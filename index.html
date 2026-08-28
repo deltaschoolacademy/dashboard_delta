@@ -347,6 +347,7 @@ function modalCliente(){
       <div><label class="lbl">Naturalidade</label><input class="inp" id="c-natu" placeholder="Cidade/UF"></div>
       <div><label class="lbl">Telefone / WhatsApp</label><input class="inp mono" id="c-tel" placeholder="(47) 9…"></div>
       <div><label class="lbl">E-mail</label><input class="inp" id="c-email"></div>
+      <div><label class="lbl">Instagram</label><input class="inp" id="c-insta" placeholder="@perfil"></div>
       <div><label class="lbl">CEP</label><input class="inp mono" id="c-cep" placeholder="00000-000" onblur="cepFill('c-cep','c-log','c-bairro','c-cidade','c-uf','c-num','c-cephint')"><div class="cell-sub" id="c-cephint"></div></div>
       <div><label class="lbl">Número</label><input class="inp" id="c-num"></div>
       <div class="full"><label class="lbl">Logradouro</label><input class="inp" id="c-log"></div>
@@ -357,12 +358,18 @@ function modalCliente(){
       <div><label class="lbl">CR / CAF</label><input class="inp" id="c-cr"></div>
       <div><label class="lbl">Clube</label><input class="inp" id="c-clube"></div>
       <div><label class="lbl">Interesse</label><select class="inp" id="c-interesse">
-        <option value="">—</option><option>Academia — cursos e treinamento</option>
-        <option>Despachante — documentação / CAC</option><option>Academia e Despachante</option>
+        <option value="">—</option><option>Formação</option>
+        <option>Documentação Controlada</option><option>Ambos</option>
         <option>Ainda não sei / quero saber mais</option></select></div>
+      <div><label class="lbl">Área de interesse</label><select class="inp" id="c-area">
+        <option value="">—</option><option>Formação técnica</option><option>Formação estratégica</option>
+        <option>Curso livre / capacitação</option><option>Certificação</option><option>Ainda não sei / quero orientação</option></select></div>
+      <div><label class="lbl">Serviço desejado</label><select class="inp" id="c-serv">
+        <option value="">—</option><option>CRAF</option><option>SINARM</option><option>Aquisição</option>
+        <option>Transferência</option><option>Renovação</option><option>Documentação / Polícia Federal</option><option>Outro / não sei</option></select></div>
       <div><label class="lbl">Como conheceu</label><select class="inp" id="c-origem">
-        <option value="">—</option><option>Instagram</option><option>Indicação de amigo/aluno</option>
-        <option>Google / pesquisa</option><option>Clube de tiro</option><option>Já sou aluno</option><option>Outro</option></select></div>
+        <option value="">—</option><option>Indicação</option><option>Instagram</option>
+        <option>Google / busca</option><option>WhatsApp</option><option>Evento / presencial</option><option>Outro</option></select></div>
       <div class="full"><label class="lbl">Observações</label><textarea class="inp" id="c-obs" rows="2"></textarea></div>
     </div>
     <div class="msg" id="c-msg" style="color:var(--atraso)"></div>`,
@@ -380,6 +387,7 @@ async function salvarCliente(){
     bairro:el('c-bairro').value.trim()||null,cidade:el('c-cidade').value.trim()||null,
     uf:el('c-uf').value.trim().toUpperCase()||null,cr_caf:el('c-cr').value.trim()||null,
     clube:el('c-clube').value.trim()||null,interesse:el('c-interesse').value||null,
+    instagram:el('c-insta').value.trim()||null,area_interesse:el('c-area').value||null,servico_desejado:el('c-serv').value||null,
     origem:el('c-origem').value||null,observacoes:el('c-obs').value.trim()||null};
   try{await q(sb.from('clientes').insert(rec));closeOv();vClientes();}
   catch(e){el('c-msg').textContent=((e.message||'').toLowerCase().includes('duplicate')?'Este CPF já está cadastrado.':'Erro: '+e.message);}
