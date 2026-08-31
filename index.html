@@ -240,10 +240,13 @@ async function cepFill(cepId,logId,bairroId,cidId,ufId,numId,hintId){
   }catch(e){if(hintId)el(hintId).textContent='Falha ao buscar o CEP.';}
 }
 async function abrirDoc(path){
+  if(!path){alert('Documento sem link.');return;}
+  if(/^https?:\/\//i.test(path)){window.open(path,'_blank');return;} // link do Drive
   try{const {data,error}=await sb.storage.from('documentos').createSignedUrl(path,3600);
     if(error)throw error; window.open(data.signedUrl,'_blank');
   }catch(e){alert('Não foi possível abrir o documento: '+(e.message||e));}
 }
+function fileToB64(file){return new Promise((resv,rej)=>{const r=new FileReader();r.onload=()=>resv(String(r.result).split(',')[1]);r.onerror=()=>rej(new Error('falha ao ler arquivo'));r.readAsDataURL(file);});}
 
 /* AUTH */
 async function doLogin(){
@@ -594,11 +597,13 @@ async function doUpload(cid,catId,pid,nome,validadeDias,file){
     const emiss=hoje();
     const base=(onlyNum(cli.cpf)||'SEMCPF')+'_'+slug(cli.nome);
     const nomePadrao=`${base}_${slug(nome)}_${emiss}.${ext}`;
-    const path=`${base}/${nomePadrao}`;
-    const up=await sb.storage.from('documentos').upload(path,file,{upsert:true});
-    if(up.error)throw up.error;
+    const b64=await fileToB64(file);
+    const r=await fetch('/api/drive',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({pastaCliente:base,nomeArquivo:nomePadrao,fileBase64:b64,mimeType:file.type||'application/octet-stream'})});
+    const out=await r.json();
+    if(!r.ok||!out.link)throw new Error(out.error||'falha no envio ao Drive');
     let validade=null;if(validadeDias&&validadeDias!=='null'){const dt=new Date();dt.setDate(dt.getDate()+Number(validadeDias));validade=dt.toISOString().slice(0,10);}
-    await q(sb.from('documentos').insert({cliente_id:cid,catalogo_id:catId,processo_id:pid||null,tipo_doc:nome,nome_padrao:nomePadrao,drive_url:path,data_emissao:emiss,data_validade:validade,status:'recebido'}));
+    await q(sb.from('documentos').insert({cliente_id:cid,catalogo_id:catId,processo_id:pid||null,tipo_doc:nome,nome_padrao:nomePadrao,drive_url:out.link,drive_file_id:out.fileId||null,data_emissao:emiss,data_validade:validade,status:'recebido'}));
     openProcesso(pid);
   }catch(e){alert('Erro ao enviar documento: '+(e.message||e));}
 }
