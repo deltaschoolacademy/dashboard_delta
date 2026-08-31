@@ -335,8 +335,8 @@ function renderClientes(filter=''){
       </div>
     </div>`;
 }
-function modalCliente(){
-  openOv('Novo cliente',`
+function modalCliente(cli){
+  openOv(cli?'Editar cliente':'Novo cliente',`
     <div class="form-grid">
       <div class="full"><label class="lbl">Nome completo *</label><input class="inp" id="c-nome"></div>
       <div><label class="lbl">CPF</label><input class="inp mono" id="c-cpf" placeholder="000.000.000-00"></div>
@@ -373,9 +373,19 @@ function modalCliente(){
       <div class="full"><label class="lbl">Observações</label><textarea class="inp" id="c-obs" rows="2"></textarea></div>
     </div>
     <div class="msg" id="c-msg" style="color:var(--atraso)"></div>`,
-    `<button class="btn btn-ghost" onclick="closeOv()">Cancelar</button><button class="btn" onclick="salvarCliente()">Salvar cliente</button>`);
+    `<button class="btn btn-ghost" onclick="closeOv()">Cancelar</button><button class="btn" onclick="salvarCliente(${cli?("'"+cli.id+"'"):''})">${cli?'Salvar alterações':'Salvar cliente'}</button>`);
+  if(cli){
+    const set=(id,v)=>{const e=el(id); if(e)e.value=(v==null?'':v);};
+    set('c-nome',cli.nome); set('c-cpf',cpfFmt(cli.cpf)); set('c-rg',cli.rg); set('c-nasc',cli.nascimento);
+    set('c-prof',cli.profissao); set('c-nac',cli.nacionalidade); set('c-natu',cli.naturalidade);
+    set('c-tel',cli.telefone); set('c-email',cli.email); set('c-insta',cli.instagram);
+    set('c-cep',cli.cep); set('c-num',cli.numero); set('c-log',cli.logradouro); set('c-bairro',cli.bairro);
+    set('c-comp',cli.complemento); set('c-cidade',cli.cidade); set('c-uf',cli.uf); set('c-cr',cli.cr_caf);
+    set('c-clube',cli.clube); set('c-interesse',cli.interesse); set('c-area',cli.area_interesse);
+    set('c-serv',cli.servico_desejado); set('c-origem',cli.origem); set('c-obs',cli.observacoes);
+  }
 }
-async function salvarCliente(){
+async function salvarCliente(id){
   const nome=el('c-nome').value.trim();
   if(!nome){el('c-msg').textContent='Informe o nome.';return;}
   const rec={nome,cpf:onlyNum(el('c-cpf').value)||null,rg:el('c-rg').value.trim()||null,
@@ -389,12 +399,25 @@ async function salvarCliente(){
     clube:el('c-clube').value.trim()||null,interesse:el('c-interesse').value||null,
     instagram:el('c-insta').value.trim()||null,area_interesse:el('c-area').value||null,servico_desejado:el('c-serv').value||null,
     origem:el('c-origem').value||null,observacoes:el('c-obs').value.trim()||null};
-  try{await q(sb.from('clientes').insert(rec));closeOv();vClientes();}
+  try{ if(id){await q(sb.from('clientes').update(rec).eq('id',id));} else {await q(sb.from('clientes').insert(rec));} closeOv();vClientes();}
   catch(e){el('c-msg').textContent=((e.message||'').toLowerCase().includes('duplicate')?'Este CPF já está cadastrado.':'Erro: '+e.message);}
+}
+async function excluirCliente(id){
+  if(!confirm('Excluir este cliente definitivamente? Esta ação não pode ser desfeita.'))return;
+  try{
+    await q(sb.from('clientes').delete().eq('id',id));
+    closeOv(); vClientes();
+  }catch(e){
+    const m=(e.message||'').toLowerCase();
+    if(m.includes('foreign key')||m.includes('violates')||m.includes('constraint'))
+      alert('Não é possível excluir: este cliente tem matrículas, serviços ou processos vinculados. Remova esses registros antes.');
+    else alert('Erro ao excluir: '+(e.message||e));
+  }
 }
 async function verCliente(id){
   try{
     const c=(await q(sb.from('clientes').select('*').eq('id',id)))[0];
+    window._cliAtual=c;
     const docs=await q(sb.from('documentos').select('*, documentos_catalogo(nome_comercial,nome_sistema)').eq('cliente_id',id));
     const procs=await q(sb.from('processos').select('*, tipos_processo(nome)').eq('cliente_id',id));
     const docRows=docs.length?docs.map(d=>{
@@ -418,7 +441,7 @@ async function verCliente(id){
       </div>
       <div class="lbl">Documentos</div>${docRows}
       <div class="lbl" style="margin-top:14px">Processos</div>${procRows}`,
-      `<button class="btn btn-ghost" onclick="closeOv()">Fechar</button><button class="btn" onclick="closeOv();go('despachante')">Abrir despachante</button>`);
+      `<button class="btn btn-ghost" onclick="closeOv()">Fechar</button><button class="btn btn-ghost" onclick="modalCliente(window._cliAtual)">Editar</button><button class="btn" style="background:var(--atraso)" onclick="excluirCliente('${c.id}')">Excluir</button>`);
   }catch(e){openOv('Erro',erro(e));}
 }
 
