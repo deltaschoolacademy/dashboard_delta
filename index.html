@@ -209,6 +209,7 @@ tr:last-child td{border-bottom:none}
 </div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 const SUPABASE_URL='https://fdjriojmowlpvophnrso.supabase.co';
 const SUPABASE_ANON='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZkanJpb2ptb3dscHZvcGhucnNvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc4MzE3NDAsImV4cCI6MjEwMzQwNzc0MH0.IfGDkV1_hDyDNHWhSdinqv1cIuxglGmpoCFav5Jn8zY';
@@ -339,6 +340,7 @@ function clienteFormHTML(){return `<div class="form-grid">
   <div><label class="lbl">RG</label><input class="inp mono" id="c-rg"></div>
   <div><label class="lbl">Nascimento</label><input class="inp" id="c-nasc" type="date"></div>
   <div><label class="lbl">Profissão</label><input class="inp" id="c-prof"></div>
+  <div><label class="lbl">Estado civil</label><select class="inp" id="c-ecivil"><option value="">—</option><option>Solteiro(a)</option><option>Casado(a)</option><option>Divorciado(a)</option><option>Viúvo(a)</option><option>União estável</option></select></div>
   <div><label class="lbl">Nacionalidade</label><input class="inp" id="c-nac"></div>
   <div><label class="lbl">Naturalidade</label><input class="inp" id="c-natu"></div>
   <div><label class="lbl">Telefone / WhatsApp</label><input class="inp mono" id="c-tel"></div>
@@ -365,6 +367,7 @@ function modalCliente(cli){
   if(cli){const set=(id,v)=>{const e=el(id);if(e)e.value=(v==null?'':v);};
     set('c-nome',cli.nome);set('c-cpf',cpfFmt(cli.cpf));set('c-rg',cli.rg);set('c-nasc',cli.nascimento);
     set('c-prof',cli.profissao);set('c-nac',cli.nacionalidade);set('c-natu',cli.naturalidade);
+    set('c-ecivil',cli.estado_civil);
     set('c-tel',cli.telefone);set('c-email',cli.email);set('c-insta',cli.instagram);
     set('c-cep',cli.cep);set('c-num',cli.numero);set('c-log',cli.logradouro);set('c-bairro',cli.bairro);
     set('c-comp',cli.complemento);set('c-cidade',cli.cidade);set('c-uf',cli.uf);set('c-cr',cli.cr_caf);
@@ -375,7 +378,7 @@ async function salvarCliente(id){
   const nome=el('c-nome').value.trim();
   if(!nome){el('c-msg').textContent='Informe o nome.';return;}
   const rec={nome,cpf:onlyNum(el('c-cpf').value)||null,rg:el('c-rg').value.trim()||null,
-    nascimento:el('c-nasc').value||null,profissao:el('c-prof').value.trim()||null,
+    nascimento:el('c-nasc').value||null,profissao:el('c-prof').value.trim()||null,estado_civil:el('c-ecivil').value||null,
     nacionalidade:el('c-nac').value.trim()||null,naturalidade:el('c-natu').value.trim()||null,
     telefone:el('c-tel').value.trim()||null,email:el('c-email').value.trim()||null,
     cep:el('c-cep').value.trim()||null,logradouro:el('c-log').value.trim()||null,
@@ -415,6 +418,7 @@ async function verCliente(id){
         <div><span class="lbl">Nascimento</span>${dBR(c.nascimento)}</div>
         <div><span class="lbl">E-mail</span>${esc(c.email||'—')}</div>
         <div><span class="lbl">Interesse</span>${esc(c.interesse||'—')}</div></div>
+      <div style="margin-bottom:12px"><button class="btn btn-ghost btn-sm" onclick="modalDeclaracao('${c.id}')">Emitir declaração (PDF)</button></div>
       <div class="lbl">Documentos</div>${docRows}
       <div class="lbl" style="margin-top:14px">Processos</div>${procRows}`,
       `<button class="btn btn-ghost" onclick="closeOv()">Fechar</button><button class="btn btn-ghost" onclick="modalCliente(window._cliAtual)">Editar</button><button class="btn btn-danger" onclick="excluirCliente('${c.id}')">Excluir</button>`);
@@ -499,7 +503,7 @@ async function openProcesso(pid){
 async function renderChecklist(cid,tid,acts,pid,p){
   el('dp-out').innerHTML='<div class="loading">Cruzando documentos…</div>';
   try{
-    const req=await q(sb.from('tipos_processo_docs').select('condicional,ordem, documentos_catalogo(id,nome_comercial,nome_sistema,responsavel,validade_dias)').eq('tipo_processo_id',tid).order('ordem'));
+    const req=await q(sb.from('tipos_processo_docs').select('condicional,ordem, documentos_catalogo(id,codigo,nome_comercial,nome_sistema,responsavel,validade_dias)').eq('tipo_processo_id',tid).order('ordem'));
     const cli=(await q(sb.from('clientes').select('*').eq('id',cid)))[0];
     const docs=await q(sb.from('documentos').select('catalogo_id,status,data_validade,nome_padrao,drive_url').eq('cliente_id',cid));
     const has=catId=>docs.find(d=>d.catalogo_id===catId&&d.status==='recebido'&&(!d.data_validade||d.data_validade>=hoje()));
@@ -509,7 +513,7 @@ async function renderChecklist(cid,tid,acts,pid,p){
     const rows=aplic.map(r=>{const d=r.documentos_catalogo;const g=has(d.id);if(!g)faltam++;
       const cond=r.condicional==='se_2o_endereco'?' <span class="tag">se 2º end.</span>':'';
       const acao=g?`<button class="btn btn-ghost btn-sm" onclick="abrirDoc('${esc(g.drive_url||'')}')" ${g.drive_url?'':'disabled'}>Abrir</button>`
-                 :`<button class="btn btn-sm" onclick="uploadDoc('${cid}','${d.id}','${pid}','${esc(d.nome_comercial||d.nome_sistema)}',${d.validade_dias||'null'})">Enviar</button>`;
+                 :`${(d.codigo==='D09'||d.codigo==='D12')?`<button class="btn btn-ghost btn-sm" onclick="modalDeclaracao('${cid}','${d.codigo}')">Gerar</button> `:''}<button class="btn btn-sm" onclick="uploadDoc('${cid}','${d.id}','${pid}','${esc(d.nome_comercial||d.nome_sistema)}',${d.validade_dias||'null'})">Enviar</button>`;
       return `<div class="doc-row"><span class="dot ${g?'on':'off'}"></span>
         <div style="flex:1;min-width:0">${esc(d.nome_comercial||d.nome_sistema)}${cond}<div class="cell-sub">${esc(d.nome_sistema)}</div></div>
         <span class="resp">${respLabel[d.responsavel]||d.responsavel}</span>${acao}</div>`;}).join('');
@@ -558,21 +562,23 @@ async function faltantes(cid,tid,actsStr){
   const has=catId=>docs.some(d=>d.catalogo_id===catId&&d.status==='recebido'&&(!d.data_validade||d.data_validade>=hoje()));
   return req.filter(r=>condOK(r.condicional,acts)&&!has(r.documentos_catalogo.id)).map(r=>r.documentos_catalogo);
 }
+// só o que é responsabilidade do CLIENTE entra na cobrança enviada a ele
+function soDoCliente(lista){return lista.filter(d=>d.responsavel==='cliente');}
 function msgPend(op,nome,lista){
-  const linhas=lista.map(d=>`• ${d.nome_comercial||d.nome_sistema}${d.responsavel==='cliente'?'':' (providenciamos)'}`).join('\n');
-  return `Olá, ${nome}! Aqui é da Delta School Academy.\n\nPara darmos andamento ao seu processo de *${op}*, ainda faltam:\n\n${linhas}\n\nAssim que puder, nos envie por aqui. Qualquer dúvida, estamos à disposição.`;
+  const linhas=lista.map(d=>`• ${d.nome_comercial||d.nome_sistema}`).join('\n');
+  return `Olá, ${nome}! Aqui é da Delta School Academy.\n\nPara darmos andamento ao seu processo de *${op}*, precisamos que você nos envie:\n\n${linhas}\n\nAssim que puder, envie por aqui. O restante da documentação nós já estamos providenciando. Qualquer dúvida, estamos à disposição.`;
 }
 async function copiarMsg(cid,tid,actsStr){
   try{const cli=(await q(sb.from('clientes').select('nome').eq('id',cid)))[0];
-    const lista=await faltantes(cid,tid,actsStr);const op=_tipos.find(t=>t.id===tid)?.nome||'processo';
-    await navigator.clipboard.writeText(lista.length?msgPend(op,cli.nome,lista):`Olá, ${cli.nome}! Sua documentação para ${op} está completa. 👍`);
-    alert('Mensagem copiada.');
+    const lista=soDoCliente(await faltantes(cid,tid,actsStr));const op=_tipos.find(t=>t.id===tid)?.nome||'processo';
+    await navigator.clipboard.writeText(lista.length?msgPend(op,cli.nome,lista):`Olá, ${cli.nome}! Não há pendências suas para o processo de ${op} no momento. 👍`);
+    alert('Mensagem copiada (somente documentos do cliente).');
   }catch(e){alert('Erro: '+e.message);}
 }
 async function abrirWa(cid,tid,actsStr,tel){
   const cli=(await q(sb.from('clientes').select('nome').eq('id',cid)))[0];
-  const lista=await faltantes(cid,tid,actsStr);const op=_tipos.find(t=>t.id===tid)?.nome||'processo';
-  const txt=lista.length?msgPend(op,cli.nome,lista):`Olá, ${cli.nome}! Sua documentação para ${op} está completa. 👍`;
+  const lista=soDoCliente(await faltantes(cid,tid,actsStr));const op=_tipos.find(t=>t.id===tid)?.nome||'processo';
+  const txt=lista.length?msgPend(op,cli.nome,lista):`Olá, ${cli.nome}! Não há pendências suas para o processo de ${op} no momento. 👍`;
   const num=tel.length<=11?'55'+tel:tel;
   window.open(`https://wa.me/${num}?text=${encodeURIComponent(txt)}`,'_blank');
 }
@@ -595,9 +601,22 @@ async function vAcademy(){
           <div class="prog ${pct>=100?'full':''}"><i style="width:${pct}%"></i></div>
           <div class="rowflex" style="margin-top:8px"><span class="muted" style="font-size:12px">${pct}% pago</span><div class="spacer"></div><button class="btn btn-sm" onclick="verTurma('${t.id}')">Gerenciar turma</button></div>
         </div></div>`;}).join(''):'<div class="empty">Nenhuma turma.</div>';
+    const planos=await q(sb.from('planos').select('*, clientes(nome), pagamentos(valor,competencia)').order('criado_em',{ascending:false}));
+    const mesAtual=new Date().toISOString().slice(0,7);
+    const planoCards=planos.length?planos.map(pl=>{
+      const receb=(pl.pagamentos||[]).reduce((a,p)=>a+Number(p.valor),0);
+      const pagoMes=(pl.pagamentos||[]).some(p=>p.competencia===mesAtual);
+      const per=pl.periodicidade==='avulso'?'':' / '+pl.periodicidade;
+      const statusMes=pl.periodicidade==='mensal'?(pagoMes?'<span class="pill p-ok">mês pago</span>':'<span class="pill p-atraso">mês em aberto</span>'):'';
+      return `<div class="lrow" onclick="verPlano('${pl.id}')">
+        <div style="min-width:0"><div class="cell-name">${esc(pl.titulo)} ${pl.ativo?'':'<span class="tag">inativo</span>'}</div>
+          <div class="cell-sub">${esc(pl.clientes?.nome||'—')} · ${BRL(pl.valor)}${per}</div></div>
+        <div class="r">${statusMes}<div class="cell-sub">Recebido ${BRL(receb)}</div></div></div>`;}).join(''):'<div class="empty">Nenhum plano personalizado.</div>';
     el('view').innerHTML=`
       <div class="card"><div class="card-h"><h3>Cursos</h3><div class="spacer"></div><button class="btn btn-sm" onclick="modalCurso()">+ Novo curso</button></div>
         <div class="card-b" style="padding:0">${cursoRows}</div></div>
+      <div class="card"><div class="card-h"><h3>Planos personalizados <span class="muted" style="font-weight:500">(instrução recorrente)</span></h3><div class="spacer"></div><button class="btn btn-sm" onclick="modalPlano()">+ Novo plano</button></div>
+        <div class="card-b" style="padding:0">${planoCards}</div></div>
       <div class="card-h" style="border:none;padding:4px 2px 10px"><h3>Turmas</h3><div class="spacer"></div><button class="btn btn-sm" onclick="modalTurma()">+ Nova turma</button></div>
       ${turmaCards}`;
   }catch(e){el('view').innerHTML=erro(e);}
@@ -645,7 +664,8 @@ async function verTurma(tid){
     const linhas=mats.map(m=>{const pg=(m.pagamentos||[]).reduce((a,p)=>a+Number(p.valor),0);const saldo=Number(m.valor_total)-pg;tot+=Number(m.valor_total);pago+=pg;if(saldo>0)devendo++;
       return `<div class="doc-row"><div style="flex:1;min-width:0"><div class="cell-name">${esc(m.clientes?.nome||'—')}</div>
         <div class="cell-sub">Total ${BRL(m.valor_total)} · Pago ${BRL(pg)}${saldo>0?` · <b style="color:var(--atraso)">Deve ${BRL(saldo)}</b>`:''}</div></div>
-        ${saldo>0?`<button class="btn btn-sm" onclick="modalPagamento('${m.id}','${tid}',${saldo})">Registrar</button>`:'<span class="pill p-ok">quitado</span>'}</div>`;}).join('');
+        ${saldo>0?`<button class="btn btn-sm" onclick="modalPagamento('${m.id}','${tid}',${saldo})">Registrar</button>`:'<span class="pill p-ok">quitado</span>'}
+        <button class="btn btn-ghost btn-sm" onclick="emitirCertificado('${m.cliente_id}','${jsq(m.clientes?.nome)}','${jsq(t.cursos?.nome||'')}','${tid}','${t.curso_id}')">Certificado</button></div>`;}).join('');
     const pct=tot>0?Math.round(pago/tot*100):0;
     const cli=await q(sb.from('clientes').select('id,nome').order('nome'));
     openOv(esc(t.cursos?.nome||'Turma'),`
@@ -685,6 +705,178 @@ async function salvarPagamento(matId,tid){
 
 /* SEARCH */
 el('globalSearch').addEventListener('input',e=>{if(currentView!=='clientes')go('clientes');setTimeout(()=>renderClientes(e.target.value),60);});
+
+/* ============ PLANOS PERSONALIZADOS ============ */
+async function modalPlano(plano){
+  const cli=await q(sb.from('clientes').select('id,nome').order('nome'));
+  openOv(plano?'Editar plano':'Novo plano personalizado',`<div class="form-grid">
+    <div class="full"><label class="lbl">Cliente *</label><select class="inp" id="pl-cli">${cli.map(c=>`<option value="${c.id}">${esc(c.nome)}</option>`).join('')}</select></div>
+    <div class="full"><label class="lbl">Título *</label><input class="inp" id="pl-tit" placeholder="Ex.: Instrução quinzenal"></div>
+    <div><label class="lbl">Valor (R$)</label><input class="inp mono" id="pl-val" type="number" step="0.01" placeholder="800.00"></div>
+    <div><label class="lbl">Periodicidade</label><select class="inp" id="pl-per"><option value="mensal">Mensal</option><option value="quinzenal">Quinzenal</option><option value="semanal">Semanal</option><option value="avulso">Avulso</option></select></div>
+    <div><label class="lbl">Dia de vencimento</label><input class="inp mono" id="pl-dia" type="number" min="1" max="31" placeholder="10"></div>
+    <div><label class="lbl">Início</label><input class="inp" id="pl-ini" type="date" value="${hoje()}"></div>
+    <div class="full"><label class="lbl">Descrição</label><textarea class="inp" id="pl-desc" rows="2"></textarea></div>
+    <div class="full"><label class="chk"><input type="checkbox" id="pl-ativo" checked> Plano ativo</label></div>
+    </div><div class="msg" id="pl-msg" style="color:var(--atraso)"></div>`,
+    `<button class="btn btn-ghost" onclick="closeOv()">Cancelar</button><button class="btn" onclick="salvarPlano(${plano?("'"+plano.id+"'"):''})">${plano?'Salvar alterações':'Criar plano'}</button>`);
+  if(plano){el('pl-cli').value=plano.cliente_id;el('pl-tit').value=plano.titulo||'';el('pl-val').value=plano.valor||'';el('pl-per').value=plano.periodicidade||'mensal';el('pl-dia').value=plano.dia_vencimento||'';el('pl-ini').value=(plano.data_inicio||'').slice(0,10);el('pl-desc').value=plano.descricao||'';el('pl-ativo').checked=!!plano.ativo;}
+}
+async function salvarPlano(id){
+  const cliente_id=el('pl-cli').value,titulo=el('pl-tit').value.trim();
+  if(!cliente_id||!titulo){el('pl-msg').textContent='Informe o cliente e o título.';return;}
+  const rec={cliente_id,titulo,valor:el('pl-val').value?parseFloat(el('pl-val').value):0,periodicidade:el('pl-per').value,
+    dia_vencimento:el('pl-dia').value?parseInt(el('pl-dia').value):null,data_inicio:el('pl-ini').value||hoje(),
+    descricao:el('pl-desc').value.trim()||null,ativo:el('pl-ativo').checked};
+  try{if(id){await q(sb.from('planos').update(rec).eq('id',id));}else{await q(sb.from('planos').insert(rec));}closeOv();vAcademy();}
+  catch(e){el('pl-msg').textContent='Erro: '+e.message;}
+}
+async function verPlano(id){
+  try{
+    const pl=(await q(sb.from('planos').select('*, clientes(nome,telefone)').eq('id',id)))[0];
+    const pags=await q(sb.from('pagamentos').select('*').eq('plano_id',id).order('data',{ascending:false}));
+    const receb=pags.reduce((a,p)=>a+Number(p.valor),0);
+    const per=pl.periodicidade==='avulso'?'':' / '+pl.periodicidade;
+    const rows=pags.length?pags.map(p=>`<div class="doc-row"><div style="flex:1"><div class="cell-name">${BRL(p.valor)}</div><div class="cell-sub">${p.competencia?('Ref. '+p.competencia+' · '):''}${dBR(p.data)}${p.metodo?(' · '+esc(p.metodo)):''}</div></div></div>`).join(''):'<div class="muted" style="padding:8px 0">Nenhum pagamento registrado.</div>';
+    openOv(esc(pl.titulo),`
+      <div class="rowflex" style="margin-bottom:12px"><div class="avatar">${ini(pl.clientes?.nome)}</div>
+        <div><div style="font-weight:700">${esc(pl.clientes?.nome||'—')}</div><div class="cell-sub">${BRL(pl.valor)}${per} · ${pl.ativo?'ativo':'inativo'}${pl.dia_vencimento?(' · vence dia '+pl.dia_vencimento):''}</div></div></div>
+      ${pl.descricao?`<div class="muted" style="font-size:12.5px;margin-bottom:10px">${esc(pl.descricao)}</div>`:''}
+      <div class="rowflex"><span class="lbl" style="margin:0">Total recebido</span><div class="spacer"></div><b>${BRL(receb)}</b></div>
+      <div class="lbl" style="margin-top:14px">Pagamentos</div>${rows}`,
+      `<button class="btn btn-ghost" onclick="excluirPlano('${pl.id}')">Excluir</button><button class="btn btn-ghost" onclick='modalPlano(${JSON.stringify(pl).replace(/'/g,"&#39;")})'>Editar</button><button class="btn" onclick="modalPagPlano('${pl.id}',${pl.valor||0})">Registrar pagamento</button>`);
+  }catch(e){openOv('Erro',erro(e));}
+}
+function modalPagPlano(planoId,valor){
+  const mes=new Date().toISOString().slice(0,7);
+  openOv('Registrar pagamento do plano',`<div class="form-grid">
+    <div><label class="lbl">Valor (R$)</label><input class="inp mono" id="pp-val" type="number" step="0.01" value="${valor||''}"></div>
+    <div><label class="lbl">Competência (mês)</label><input class="inp" id="pp-comp" type="month" value="${mes}"></div>
+    <div><label class="lbl">Data do pagamento</label><input class="inp" id="pp-data" type="date" value="${hoje()}"></div>
+    <div><label class="lbl">Método</label><input class="inp" id="pp-met" placeholder="Pix / dinheiro / cartão"></div>
+    </div><div class="muted" style="font-size:12px;margin-top:8px">A receita entra sozinha no fluxo de caixa.</div>
+    <div class="msg" id="pp-msg" style="color:var(--atraso)"></div>`,
+    `<button class="btn btn-ghost" onclick="closeOv()">Cancelar</button><button class="btn" onclick="salvarPagPlano('${planoId}')">Salvar</button>`);
+}
+async function salvarPagPlano(planoId){
+  const val=parseFloat(el('pp-val').value);if(!(val>0)){el('pp-msg').textContent='Informe o valor.';return;}
+  try{await q(sb.from('pagamentos').insert({plano_id:planoId,tipo:'parcela',valor:val,data:el('pp-data').value||hoje(),competencia:el('pp-comp').value||null,metodo:el('pp-met').value.trim()||null}));closeOv();verPlano(planoId);}
+  catch(e){el('pp-msg').textContent='Erro: '+e.message;}
+}
+async function excluirPlano(id){
+  if(!confirm('Excluir este plano e seus pagamentos? Esta ação não pode ser desfeita.'))return;
+  try{await q(sb.from('planos').delete().eq('id',id));closeOv();vAcademy();}
+  catch(e){alert('Erro ao excluir: '+(e.message||e));}
+}
+
+/* ============ PDF: DECLARAÇÕES E CERTIFICADOS ============ */
+const jsq=s=>String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+const MESES=['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+function dataSimples(){const d=new Date();return `${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}`;}
+function endComp(c){return [c.logradouro,c.numero&&('nº '+c.numero),c.complemento,c.bairro,c.cidade&&(c.cidade+(c.uf?' – '+c.uf:''))].filter(Boolean).join(', ');}
+function jpdf(orient){const {jsPDF}=window.jspdf;return new jsPDF({orientation:orient||'portrait',unit:'mm',format:'a4'});}
+function genDeclaracaoPDF(titulo,paragrafos,assinatura,rodape,filename){
+  const doc=jpdf('portrait');const W=210,margin=22,maxw=W-margin*2;let y=30;
+  doc.setFont('helvetica','bold');doc.setFontSize(13);
+  doc.splitTextToSize(titulo,maxw).forEach(l=>{doc.text(l,W/2,y,{align:'center'});y+=7;});
+  y+=8; doc.setFont('helvetica','normal');doc.setFontSize(11.5);
+  paragrafos.forEach(p=>{const lines=doc.splitTextToSize(p,maxw);doc.text(lines,margin,y,{lineHeightFactor:1.5});y+=lines.length*6.4+5;});
+  y+=18;
+  if(assinatura){doc.text('_________________________________________',W/2,y,{align:'center'});y+=6;doc.setFont('helvetica','bold');doc.text(assinatura,W/2,y,{align:'center'});doc.setFont('helvetica','normal');y+=9;}
+  if(rodape&&rodape.length){doc.setFontSize(9.5);doc.setTextColor(90,90,85);rodape.forEach(r=>{const l=doc.splitTextToSize(r,maxw);doc.text(l,margin,y);y+=l.length*5;});}
+  doc.save(filename);
+}
+async function gerarDSA(cid,atividade,finalidade){
+  const c=(await q(sb.from('clientes').select('*').eq('id',cid)))[0];
+  const p1=`EU, ${c.nome}, ${c.nacionalidade||'brasileiro(a)'}, natural de ${c.naturalidade||'—'}, nascido em ${dBR(c.nascimento)}, ${c.profissao||'—'}, residindo em ${endComp(c)}, CEP ${c.cep||'—'} e CPF nº ${cpfFmt(c.cpf)}.`;
+  const p2=`DECLARO, para fim de ${finalidade}, que o local de guarda do meu acervo de ${atividade}, possui cofre ou lugar seguro, com tranca, para armazenamento das armas de fogo desmuniciadas de que sou proprietário, e de que adotarei as medidas necessárias para impedir que menor de dezoito anos de idade ou pessoa civilmente incapaz se apodere de arma de fogo sob minha posse ou de minha propriedade, observado o disposto no art. 13 da Lei nº 10.826, de 2003.`;
+  const p3=`${(c.cidade||'').toUpperCase()}${c.uf?' – '+c.uf:''}, ${dataSimples()}.`;
+  genDeclaracaoPDF('ANEXO A\nDECLARAÇÃO DE SEGURANÇA DO ACERVO (DSA)',[p1,p2,p3],c.nome,null,`DSA_${slug(c.nome)}.pdf`);
+}
+async function gerarInexistencia(cid){
+  const c=(await q(sb.from('clientes').select('*').eq('id',cid)))[0];
+  const p1=`EU, ${c.nome}, portador do RG nº ${c.rg||'—'} e do CPF nº ${cpfFmt(c.cpf)}${c.estado_civil?', '+c.estado_civil.toLowerCase():''}, residente na ${endComp(c)}, CEP ${c.cep||'—'}, declaro sob as penas da lei, que não respondo processo criminal e/ou inquérito policial, e estou ciente de que, em caso de falsidade ideológica, ficarei sujeito às sanções prescritas no Código Penal e às demais cominações legais aplicáveis.`;
+  const art=`Art. 299 – "Omitir, em documento público ou particular, declaração que nele deveria constar, ou nele inserir ou fazer inserir declaração falsa ou diversa da que devia ser escrita, com o fim de prejudicar direito, criar obrigação ou alterar a verdade sobre o fato juridicamente relevante. Pena: reclusão de 1 (um) a 5 (cinco) anos e multa, se o documento é público e reclusão de 1 (um) a 3 (três) anos, se o documento é particular."`;
+  const p3=`${(c.cidade||'').toUpperCase()}${c.uf?' – '+c.uf:''}, ${dataSimples()}.`;
+  genDeclaracaoPDF('DECLARAÇÃO DE INEXISTÊNCIA DE INQUÉRITOS POLICIAIS OU PROCESSOS CRIMINAIS',[p1,art,p3],`${c.nome}\nCPF: ${cpfFmt(c.cpf)}`,null,`Inexistencia_${slug(c.nome)}.pdf`);
+}
+async function gerarResidencia(cid,decl){
+  const c=(await q(sb.from('clientes').select('*').eq('id',cid)))[0];
+  const p1=`Eu, ${decl.nome}, residente na ${decl.endereco}, CPF nº ${decl.cpf}, RG nº ${decl.rg} - Órgão Exped. ${decl.orgao}.`;
+  const p2=`Declaro, a pedido do(a) interessado(a) e para fins de prova de residência, que o(a) Sr.(a) ${c.nome}, inscrito(a) no CPF: ${cpfFmt(c.cpf)}, portador(a) do RG ${c.rg||'—'}, reside comigo neste endereço desde o ano de ${decl.desde}.`;
+  const p3=`Por ser verdade, dato e assino o presente documento, declarando estar ciente de que responderei criminalmente em caso de falsidade das informações aqui prestadas.`;
+  const p4=`Local: ${decl.cidade||c.cidade||''}, ${dataSimples()}.`;
+  genDeclaracaoPDF('DECLARAÇÃO DE RESIDÊNCIA',[p1,p2,p3,p4],`${decl.nome}\nAssinatura do Declarante`,
+    ['Observações:','1) Reconhecer firma desta declaração.','2) Anexar comprovante de residência em nome do declarante.'],
+    `Residencia_${slug(c.nome)}.pdf`);
+}
+function modalDeclaracao(cid,preset){
+  openOv('Emitir declaração',`
+    <div class="form-grid">
+      <div class="full"><label class="lbl">Tipo de declaração</label>
+        <select class="inp" id="dec-tipo" onchange="decToggle()">
+          <option value="dsa">Segurança do Acervo (DSA)</option>
+          <option value="inex">Inexistência de Inquérito</option>
+          <option value="resid">Residência (por terceiro)</option>
+        </select></div>
+    </div>
+    <div id="dec-dsa" style="margin-top:6px">
+      <div class="form-grid">
+        <div><label class="lbl">Atividade do acervo</label><select class="inp" id="dec-ativ"><option>Colecionador</option><option>Atirador Desportivo</option><option>Caçador</option></select></div>
+        <div><label class="lbl">Finalidade</label><input class="inp" id="dec-fin" value="aquisição de arma de fogo"></div>
+      </div>
+    </div>
+    <div id="dec-resid" style="display:none;margin-top:6px">
+      <div class="muted" style="font-size:12px;margin-bottom:8px">Dados de quem declara (parente/cônjuge dono do comprovante):</div>
+      <div class="form-grid">
+        <div class="full"><label class="lbl">Nome do declarante</label><input class="inp" id="dr-nome"></div>
+        <div><label class="lbl">CPF</label><input class="inp mono" id="dr-cpf"></div>
+        <div><label class="lbl">RG</label><input class="inp mono" id="dr-rg"></div>
+        <div><label class="lbl">Órgão expedidor</label><input class="inp" id="dr-orgao" placeholder="SSP/RS"></div>
+        <div><label class="lbl">Reside desde (ano)</label><input class="inp mono" id="dr-desde" placeholder="2020"></div>
+        <div class="full"><label class="lbl">Endereço do declarante</label><input class="inp" id="dr-end"></div>
+        <div><label class="lbl">Cidade</label><input class="inp" id="dr-cidade"></div>
+      </div>
+    </div>
+    <div class="msg" id="dec-msg" style="color:var(--atraso)"></div>`,
+    `<button class="btn btn-ghost" onclick="closeOv()">Fechar</button><button class="btn" onclick="emitirDeclaracao('${cid}')">Gerar PDF</button>`);
+  if(preset==='D09')el('dec-tipo').value='dsa';
+  if(preset==='D12')el('dec-tipo').value='inex';
+  decToggle();
+}
+function decToggle(){const t=el('dec-tipo').value;el('dec-dsa').style.display=(t==='dsa')?'block':'none';el('dec-resid').style.display=(t==='resid')?'block':'none';}
+async function emitirDeclaracao(cid){
+  const t=el('dec-tipo').value;
+  try{
+    if(t==='dsa')await gerarDSA(cid,el('dec-ativ').value,el('dec-fin').value.trim()||'aquisição de arma de fogo');
+    else if(t==='inex')await gerarInexistencia(cid);
+    else{
+      const decl={nome:el('dr-nome').value.trim(),cpf:el('dr-cpf').value.trim(),rg:el('dr-rg').value.trim(),orgao:el('dr-orgao').value.trim(),desde:el('dr-desde').value.trim(),endereco:el('dr-end').value.trim(),cidade:el('dr-cidade').value.trim()};
+      if(!decl.nome||!decl.endereco){el('dec-msg').textContent='Preencha ao menos nome e endereço do declarante.';return;}
+      await gerarResidencia(cid,decl);
+    }
+    closeOv();
+  }catch(e){el('dec-msg').textContent='Erro ao gerar: '+(e.message||e);}
+}
+async function emitirCertificado(cid,nome,curso,turmaId,cursoId){
+  // Layout temporário (funcional). Será substituído pelo modelo oficial da Delta.
+  const doc=jpdf('landscape');const W=297,H=210;
+  doc.setDrawColor(91,101,67);doc.setLineWidth(1.4);doc.rect(12,12,W-24,H-24);
+  doc.setDrawColor(138,148,100);doc.setLineWidth(0.4);doc.rect(16,16,W-32,H-32);
+  doc.setFont('helvetica','bold');doc.setTextColor(11,11,9);doc.setFontSize(30);
+  doc.text('CERTIFICADO',W/2,54,{align:'center'});
+  doc.setFont('helvetica','normal');doc.setFontSize(13);doc.setTextColor(60,60,55);
+  doc.text('Certificamos que',W/2,78,{align:'center'});
+  doc.setFont('helvetica','bold');doc.setFontSize(24);doc.setTextColor(11,11,9);
+  doc.text(nome,W/2,96,{align:'center',maxWidth:W-60});
+  doc.setFont('helvetica','normal');doc.setFontSize(13);doc.setTextColor(60,60,55);
+  doc.text(doc.splitTextToSize(`concluiu com aproveitamento o curso ${curso}.`,W-90),W/2,112,{align:'center'});
+  doc.setFontSize(11);doc.text(dataSimples(),W/2,146,{align:'center'});
+  doc.setFont('helvetica','bold');doc.setFontSize(11);doc.setTextColor(120,120,110);
+  doc.text('DELTA SCHOOL ACADEMY',W/2,H-30,{align:'center'});
+  doc.save(`Certificado_${slug(nome)}.pdf`);
+  try{await q(sb.from('certificados').insert({cliente_id:cid,curso_id:cursoId||null,turma_id:turmaId||null,nome_no_certificado:nome,curso_nome:curso}));}catch(e){console.warn('registro cert:',e.message);}
+}
 
 /* boot */
 (async()=>{const {data}=await sb.auth.getSession();if(!data.session)el('login').style.display='flex';})();
