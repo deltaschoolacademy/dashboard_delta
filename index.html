@@ -530,11 +530,20 @@ async function renderChecklist(cid,tid,acts,pid,p){
             <select class="inp" style="width:auto" onchange="mudarStatus('${pid}',this.value)">
               ${['triagem','coleta_documentos','protocolado','concluido','cancelado'].map(s=>`<option ${p&&p.status===s?'selected':''}>${s}</option>`).join('')}
             </select>
+            <button class="btn btn-danger btn-sm" onclick="excluirProcesso('${pid}')">Excluir processo</button>
           </div>
         </div></div>`;
   }catch(e){el('dp-out').innerHTML=erro(e);}
 }
 async function mudarStatus(pid,status){try{await q(sb.from('processos').update({status}).eq('id',pid));}catch(e){alert('Erro: '+e.message);}}
+async function excluirProcesso(pid){
+  if(!confirm('Excluir este processo? Os documentos já enviados continuam no cadastro do cliente. Esta ação não pode ser desfeita.'))return;
+  try{
+    await q(sb.from('documentos').update({processo_id:null}).eq('processo_id',pid));
+    await q(sb.from('processos').delete().eq('id',pid));
+    el('dp-out').innerHTML=''; vDespachante();
+  }catch(e){alert('Erro ao excluir processo: '+(e.message||e));}
+}
 function uploadDoc(cid,catId,pid,nome,validadeDias){
   const inp=document.createElement('input');inp.type='file';inp.accept='.pdf,.jpg,.jpeg,.png,.webp';
   inp.onchange=()=>{if(inp.files[0])doUpload(cid,catId,pid,nome,validadeDias,inp.files[0]);};
