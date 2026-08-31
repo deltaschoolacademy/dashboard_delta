@@ -298,7 +298,13 @@ async function vInicio(){
   }catch(e){el('view').innerHTML=erro(e);}
 }
 function modalDespesa(){
-  openOv('Lançar despesa',`<div class="form-grid">
+  openOv('Lançar despesa',`
+    <div style="background:var(--ivory);border:1px dashed var(--linha);border-radius:10px;padding:12px;margin-bottom:14px">
+      <div class="rowflex"><button class="btn btn-ghost btn-sm" onclick="lerCupom()">📷 Ler cupom (OCR)</button>
+      <span class="muted" id="ocr-status" style="font-size:12px"></span></div>
+      <div class="muted" style="font-size:11.5px;margin-top:6px">Tire ou envie a foto do cupom — os campos abaixo são preenchidos automaticamente. Confira antes de salvar.</div>
+    </div>
+    <div class="form-grid">
     <div class="full"><label class="lbl">Descrição</label><input class="inp" id="d-desc"></div>
     <div><label class="lbl">Categoria</label><input class="inp" id="d-cat" placeholder="Operacional"></div>
     <div><label class="lbl">Fornecedor</label><input class="inp" id="d-forn"></div>
@@ -307,10 +313,42 @@ function modalDespesa(){
     </div><div class="msg" id="d-msg" style="color:var(--atraso)"></div>`,
     `<button class="btn btn-ghost" onclick="closeOv()">Cancelar</button><button class="btn" onclick="salvarDespesa()">Salvar</button>`);
 }
+let _ocrFonte='manual';
+function lerCupom(){
+  const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.setAttribute('capture','environment');
+  inp.onchange=()=>{if(inp.files[0])processarCupom(inp.files[0]);};
+  inp.click();
+}
+function compImg(file){return new Promise((resv,rej)=>{
+  const img=new Image();const url=URL.createObjectURL(file);
+  img.onload=()=>{const max=1600;let w=img.width,h=img.height;
+    if(w>h&&w>max){h=Math.round(h*max/w);w=max;}else if(h>=w&&h>max){w=Math.round(w*max/h);h=max;}
+    const cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);
+    URL.revokeObjectURL(url);resv(cv.toDataURL('image/jpeg',0.8).split(',')[1]);};
+  img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('imagem inválida'));};img.src=url;});
+}
+async function processarCupom(file){
+  const st=el('ocr-status');const set=(c,t)=>{if(st){st.style.color=c;st.textContent=t;}};
+  set('var(--txt-suave)','Lendo cupom…');
+  try{
+    const b64=await compImg(file);
+    const r=await fetch('/api/ocr',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({image:b64,media_type:'image/jpeg'})});
+    const data=await r.json();
+    if(!r.ok||!data.parsed){set('var(--atraso)','Não consegui ler. Preencha manualmente.');return;}
+    const p=data.parsed;
+    if(p.valor!=null)el('d-val').value=p.valor;
+    if(p.fornecedor)el('d-forn').value=p.fornecedor;
+    if(p.data)el('d-data').value=p.data;
+    if(p.categoria)el('d-cat').value=p.categoria;
+    if(!el('d-desc').value)el('d-desc').value=p.fornecedor?('Compra — '+p.fornecedor):'Despesa (cupom)';
+    _ocrFonte='cupom';
+    set('var(--oliva)','Preenchido pela leitura do cupom. Confira e salve.');
+  }catch(e){set('var(--atraso)','Erro ao ler: '+(e.message||e));}
+}
 async function salvarDespesa(){
   const desc=el('d-desc').value.trim(),val=parseFloat(el('d-val').value);
   if(!desc||!(val>0)){el('d-msg').textContent='Preencha descrição e valor.';return;}
-  try{await q(sb.from('lancamentos').insert({tipo:'despesa',descricao:desc,categoria:el('d-cat').value.trim()||'Geral',fornecedor:el('d-forn').value.trim()||null,valor:val,data:el('d-data').value||hoje(),fonte:'manual'}));closeOv();vInicio();}
+  try{await q(sb.from('lancamentos').insert({tipo:'despesa',descricao:desc,categoria:el('d-cat').value.trim()||'Geral',fornecedor:el('d-forn').value.trim()||null,valor:val,data:el('d-data').value||hoje(),fonte:_ocrFonte}));_ocrFonte='manual';closeOv();vInicio();}
   catch(e){el('d-msg').textContent='Erro: '+e.message;}
 }
 
