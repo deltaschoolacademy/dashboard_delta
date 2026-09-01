@@ -591,19 +591,19 @@ function uploadDoc(cid,catId,pid,nome,validadeDias){
   inp.click();
 }
 async function doUpload(cid,catId,pid,nome,validadeDias,file){
+  // TEMPORÁRIO: enviando ao armazenamento do Supabase enquanto o Google Drive não propaga no Admin.
+  // Para voltar ao Drive: restaurar a versão que chama /api/drive.
   try{
     const cli=(await q(sb.from('clientes').select('cpf,nome').eq('id',cid)))[0];
     const ext=(file.name.split('.').pop()||'pdf').toLowerCase();
     const emiss=hoje();
     const base=(onlyNum(cli.cpf)||'SEMCPF')+'_'+slug(cli.nome);
     const nomePadrao=`${base}_${slug(nome)}_${emiss}.${ext}`;
-    const b64=await fileToB64(file);
-    const r=await fetch('/api/drive',{method:'POST',headers:{'content-type':'application/json'},
-      body:JSON.stringify({pastaCliente:base,nomeArquivo:nomePadrao,fileBase64:b64,mimeType:file.type||'application/octet-stream'})});
-    const out=await r.json();
-    if(!r.ok||!out.link)throw new Error(out.error||'falha no envio ao Drive');
+    const path=`${base}/${nomePadrao}`;
+    const up=await sb.storage.from('documentos').upload(path,file,{upsert:true});
+    if(up.error)throw up.error;
     let validade=null;if(validadeDias&&validadeDias!=='null'){const dt=new Date();dt.setDate(dt.getDate()+Number(validadeDias));validade=dt.toISOString().slice(0,10);}
-    await q(sb.from('documentos').insert({cliente_id:cid,catalogo_id:catId,processo_id:pid||null,tipo_doc:nome,nome_padrao:nomePadrao,drive_url:out.link,drive_file_id:out.fileId||null,data_emissao:emiss,data_validade:validade,status:'recebido'}));
+    await q(sb.from('documentos').insert({cliente_id:cid,catalogo_id:catId,processo_id:pid||null,tipo_doc:nome,nome_padrao:nomePadrao,drive_url:path,data_emissao:emiss,data_validade:validade,status:'recebido'}));
     openProcesso(pid);
   }catch(e){alert('Erro ao enviar documento: '+(e.message||e));}
 }
@@ -840,10 +840,11 @@ function genDeclaracaoPDF(titulo,paragrafos,assinatura,rodape,filename){
 }
 async function gerarDSA(cid,atividade,finalidade){
   const c=(await q(sb.from('clientes').select('*').eq('id',cid)))[0];
-  const p1=`EU, ${c.nome}, ${c.nacionalidade||'brasileiro(a)'}, natural de ${c.naturalidade||'—'}, nascido em ${dBR(c.nascimento)}, ${c.profissao||'—'}, residindo em ${endComp(c)}, CEP ${c.cep||'—'} e CPF nº ${cpfFmt(c.cpf)}.`;
-  const p2=`DECLARO, para fim de ${finalidade}, que o local de guarda do meu acervo de ${atividade}, possui cofre ou lugar seguro, com tranca, para armazenamento das armas de fogo desmuniciadas de que sou proprietário, e de que adotarei as medidas necessárias para impedir que menor de dezoito anos de idade ou pessoa civilmente incapaz se apodere de arma de fogo sob minha posse ou de minha propriedade, observado o disposto no art. 13 da Lei nº 10.826, de 2003.`;
-  const p3=`${(c.cidade||'').toUpperCase()}${c.uf?' – '+c.uf:''}, ${dataSimples()}.`;
-  genDeclaracaoPDF('ANEXO A\nDECLARAÇÃO DE SEGURANÇA DO ACERVO (DSA)',[p1,p2,p3],c.nome,null,`DSA_${slug(c.nome)}.pdf`);
+  const natural=c.naturalidade||(c.cidade?(c.cidade+(c.uf?'/'+c.uf:'')):'—');
+  const p1=`EU, ${c.nome}, ${c.nacionalidade||'brasileiro(a)'}, natural de ${natural}, nascido em ${dBR(c.nascimento)}, ${c.profissao||'—'}, residindo em ${endComp(c)}, CEP ${c.cep||'—'} e CPF nº ${cpfFmt(c.cpf)}.`;
+  const p2=`DECLARO, para fim de ${finalidade} (concessão, revalidação de Registro no Comando do Exército ou de apostilamento), que o local de guarda do meu acervo de ${atividade} atende as condições de segurança previstas no Anexo F da Portaria nº 150 – COLOG/2019.`;
+  const p3=`${(c.cidade||'')}${c.uf?'/'+c.uf:''}, ${dataSimples()}.`;
+  genDeclaracaoPDF('Anexo D\nDECLARAÇÃO DE SEGURANÇA DO ACERVO (DSA)',[p1,p2,p3],c.nome,null,`DSA_${slug(c.nome)}.pdf`);
 }
 async function gerarInexistencia(cid){
   const c=(await q(sb.from('clientes').select('*').eq('id',cid)))[0];
@@ -875,7 +876,7 @@ function modalDeclaracao(cid,preset){
     <div id="dec-dsa" style="margin-top:6px">
       <div class="form-grid">
         <div><label class="lbl">Atividade do acervo</label><select class="inp" id="dec-ativ"><option>Colecionador</option><option>Atirador Desportivo</option><option>Caçador</option></select></div>
-        <div><label class="lbl">Finalidade</label><input class="inp" id="dec-fin" value="aquisição de arma de fogo"></div>
+        <div><label class="lbl">Finalidade</label><select class="inp" id="dec-fin"><option value="concessão de registro">Concessão de registro</option><option value="revalidação de registro">Revalidação de registro</option><option value="apostilamento ao registro">Apostilamento ao registro</option></select></div>
       </div>
     </div>
     <div id="dec-resid" style="display:none;margin-top:6px">
@@ -900,7 +901,7 @@ function decToggle(){const t=el('dec-tipo').value;el('dec-dsa').style.display=(t
 async function emitirDeclaracao(cid){
   const t=el('dec-tipo').value;
   try{
-    if(t==='dsa')await gerarDSA(cid,el('dec-ativ').value,el('dec-fin').value.trim()||'aquisição de arma de fogo');
+    if(t==='dsa')await gerarDSA(cid,el('dec-ativ').value,el('dec-fin').value||'concessão de registro');
     else if(t==='inex')await gerarInexistencia(cid);
     else{
       const decl={nome:el('dr-nome').value.trim(),cpf:el('dr-cpf').value.trim(),rg:el('dr-rg').value.trim(),orgao:el('dr-orgao').value.trim(),desde:el('dr-desde').value.trim(),endereco:el('dr-end').value.trim(),cidade:el('dr-cidade').value.trim()};
