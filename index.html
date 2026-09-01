@@ -826,6 +826,7 @@ const jsq=s=>String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
 const MESES=['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 function dataSimples(){const d=new Date();return `${d.getDate()} de ${MESES[d.getMonth()]} de ${d.getFullYear()}`;}
 function endComp(c){return [c.logradouro,c.numero&&('nº '+c.numero),c.complemento,c.bairro,c.cidade&&(c.cidade+(c.uf?' – '+c.uf:''))].filter(Boolean).join(', ');}
+const bl=(v,n=24)=>{const s=(v==null?'':String(v)).trim();return s||('_'.repeat(n));};
 function jpdf(orient){const {jsPDF}=window.jspdf;return new jsPDF({orientation:orient||'portrait',unit:'mm',format:'a4'});}
 function genDeclaracaoPDF(titulo,paragrafos,assinatura,rodape,filename){
   const doc=jpdf('portrait');const W=210,margin=22,maxw=W-margin*2;let y=30;
@@ -840,23 +841,24 @@ function genDeclaracaoPDF(titulo,paragrafos,assinatura,rodape,filename){
 }
 async function gerarDSA(cid,atividade,finalidade){
   const c=(await q(sb.from('clientes').select('*').eq('id',cid)))[0];
-  const natural=c.naturalidade||(c.cidade?(c.cidade+(c.uf?'/'+c.uf:'')):'—');
-  const p1=`EU, ${c.nome}, ${c.nacionalidade||'brasileiro(a)'}, natural de ${natural}, nascido em ${dBR(c.nascimento)}, ${c.profissao||'—'}, residindo em ${endComp(c)}, CEP ${c.cep||'—'} e CPF nº ${cpfFmt(c.cpf)}.`;
+  const natural=c.naturalidade||(c.cidade?(c.cidade+(c.uf?'/'+c.uf:'')):bl('',20));
+  const nasc=c.nascimento?dBR(c.nascimento):'__/__/____';
+  const p1=`EU, ${c.nome}, ${c.nacionalidade||'brasileiro(a)'}, natural de ${natural}, nascido em ${nasc}, ${bl(c.profissao,20)}, residindo em ${endComp(c)||bl('',24)} e CPF nº ${cpfFmt(c.cpf)}.`;
   const p2=`DECLARO, para fim de ${finalidade} (concessão, revalidação de Registro no Comando do Exército ou de apostilamento), que o local de guarda do meu acervo de ${atividade} atende as condições de segurança previstas no Anexo F da Portaria nº 150 – COLOG/2019.`;
-  const p3=`${(c.cidade||'')}${c.uf?'/'+c.uf:''}, ${dataSimples()}.`;
+  const p3=`${bl(c.cidade,18)}${c.uf?'/'+c.uf:''}, ${dataSimples()}.`;
   genDeclaracaoPDF('Anexo D\nDECLARAÇÃO DE SEGURANÇA DO ACERVO (DSA)',[p1,p2,p3],c.nome,null,`DSA_${slug(c.nome)}.pdf`);
 }
 async function gerarInexistencia(cid){
   const c=(await q(sb.from('clientes').select('*').eq('id',cid)))[0];
-  const p1=`EU, ${c.nome}, portador do RG nº ${c.rg||'—'} e do CPF nº ${cpfFmt(c.cpf)}${c.estado_civil?', '+c.estado_civil.toLowerCase():''}, residente na ${endComp(c)}, CEP ${c.cep||'—'}, declaro sob as penas da lei, que não respondo processo criminal e/ou inquérito policial, e estou ciente de que, em caso de falsidade ideológica, ficarei sujeito às sanções prescritas no Código Penal e às demais cominações legais aplicáveis.`;
+  const p1=`EU, ${c.nome}, portador do RG nº ${bl(c.rg,14)} e do CPF nº ${cpfFmt(c.cpf)}${c.estado_civil?', '+c.estado_civil.toLowerCase():''}, residente na ${endComp(c)||bl('',24)}${c.cep?(', CEP '+c.cep):''}, declaro sob as penas da lei, que não respondo processo criminal e/ou inquérito policial, e estou ciente de que, em caso de falsidade ideológica, ficarei sujeito às sanções prescritas no Código Penal e às demais cominações legais aplicáveis.`;
   const art=`Art. 299 – "Omitir, em documento público ou particular, declaração que nele deveria constar, ou nele inserir ou fazer inserir declaração falsa ou diversa da que devia ser escrita, com o fim de prejudicar direito, criar obrigação ou alterar a verdade sobre o fato juridicamente relevante. Pena: reclusão de 1 (um) a 5 (cinco) anos e multa, se o documento é público e reclusão de 1 (um) a 3 (três) anos, se o documento é particular."`;
-  const p3=`${(c.cidade||'').toUpperCase()}${c.uf?' – '+c.uf:''}, ${dataSimples()}.`;
+  const p3=`${bl(c.cidade,18)}${c.uf?'/'+c.uf:''}, ${dataSimples()}.`;
   genDeclaracaoPDF('DECLARAÇÃO DE INEXISTÊNCIA DE INQUÉRITOS POLICIAIS OU PROCESSOS CRIMINAIS',[p1,art,p3],`${c.nome}\nCPF: ${cpfFmt(c.cpf)}`,null,`Inexistencia_${slug(c.nome)}.pdf`);
 }
 async function gerarResidencia(cid,decl){
   const c=(await q(sb.from('clientes').select('*').eq('id',cid)))[0];
-  const p1=`Eu, ${decl.nome}, residente na ${decl.endereco}, CPF nº ${decl.cpf}, RG nº ${decl.rg} - Órgão Exped. ${decl.orgao}.`;
-  const p2=`Declaro, a pedido do(a) interessado(a) e para fins de prova de residência, que o(a) Sr.(a) ${c.nome}, inscrito(a) no CPF: ${cpfFmt(c.cpf)}, portador(a) do RG ${c.rg||'—'}, reside comigo neste endereço desde o ano de ${decl.desde}.`;
+  const p1=`Eu, ${bl(decl.nome,24)}, residente na ${bl(decl.endereco,24)}, CPF nº ${bl(decl.cpf,16)}, RG nº ${bl(decl.rg,14)} - Órgão Exped. ${bl(decl.orgao,10)}.`;
+  const p2=`Declaro, a pedido do(a) interessado(a) e para fins de prova de residência, que o(a) Sr.(a) ${c.nome}, inscrito(a) no CPF: ${cpfFmt(c.cpf)}, portador(a) do RG ${bl(c.rg,14)}, reside comigo neste endereço desde o ano de ${bl(decl.desde,6)}.`;
   const p3=`Por ser verdade, dato e assino o presente documento, declarando estar ciente de que responderei criminalmente em caso de falsidade das informações aqui prestadas.`;
   const p4=`Local: ${decl.cidade||c.cidade||''}, ${dataSimples()}.`;
   genDeclaracaoPDF('DECLARAÇÃO DE RESIDÊNCIA',[p1,p2,p3,p4],`${decl.nome}\nAssinatura do Declarante`,
