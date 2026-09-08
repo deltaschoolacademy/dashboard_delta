@@ -186,6 +186,7 @@ tr:last-child td{border-bottom:none}
         <div class="nav-item" data-view="clientes"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M17 14c2.2 0 4 1.8 4 4"/></svg> Clientes</div>
         <div class="nav-item" data-view="despachante"><svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7zM14 3v4h4M9 12h6M9 16h6"/></svg> Despachante</div>
         <div class="nav-item" data-view="academy"><svg viewBox="0 0 24 24"><path d="M12 3 2 8l10 5 10-5zM6 10.5V16c0 1.5 2.7 3 6 3s6-1.5 6-3v-5.5"/></svg> Academia</div>
+        <div class="nav-item" data-view="admin" id="nav-admin" style="display:none"><svg viewBox="0 0 24 24"><path d="M12 2l7 4v6c0 4-3 7-7 8-4-1-7-4-7-8V6z"/></svg> Admin</div>
       </nav>
       <div class="sb-bot"><div class="who" id="who">—</div><button class="btn btn-ghost btn-sm" id="logout" style="width:100%;color:var(--ivory);border-color:var(--linha-dark)">Sair</button></div>
     </aside>
@@ -258,20 +259,27 @@ async function doLogin(){
 el('li-btn').addEventListener('click',doLogin);
 el('li-pass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 el('logout').addEventListener('click',()=>sb.auth.signOut());
+/* ==== ADMIN: apenas o e-mail principal ==== */
+const ADMIN_EMAILS=['deltaschoolacademy@gmail.com']; // ← e-mail(s) com acesso à aba Admin
+const isAdmin=email=>ADMIN_EMAILS.map(x=>x.toLowerCase()).includes((email||'').toLowerCase());
 sb.auth.onAuthStateChange((_e,s)=>{
-  if(s&&s.user){el('login').style.display='none';el('app').style.display='block';el('who').textContent=s.user.email;go(currentView);}
-  else{el('app').style.display='none';el('login').style.display='flex';}
+  if(s&&s.user){
+    el('login').style.display='none';el('app').style.display='block';el('who').textContent=s.user.email;
+    el('nav-admin').style.display=isAdmin(s.user.email)?'flex':'none';
+    go(currentView);
+  } else{el('app').style.display='none';el('login').style.display='flex';}
 });
 
 /* NAV */
 let currentView='inicio';
-const titles={inicio:'Início',clientes:'Clientes',despachante:'Serviços de Despachante',academy:'Delta School Academy'};
+const titles={inicio:'Início',clientes:'Clientes',despachante:'Serviços de Despachante',academy:'Delta School Academy',admin:'Administração'};
 function go(v){
+  if(v==='admin'&&!isAdmin(el('who').textContent)){v='inicio';}
   currentView=v; toggleNav(false);
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('on',n.dataset.view===v));
   el('pageTitle').textContent=titles[v]||'—';
   el('view').innerHTML='<div class="loading">Carregando…</div>';
-  ({inicio:vInicio,clientes:vClientes,despachante:vDespachante,academy:vAcademy}[v]||vInicio)();
+  ({inicio:vInicio,clientes:vClientes,despachante:vDespachante,academy:vAcademy,admin:vAdmin}[v]||vInicio)();
 }
 el('nav').addEventListener('click',e=>{const it=e.target.closest('.nav-item');if(it)go(it.dataset.view);});
 function erro(e){return `<div class="empty">Erro ao carregar: ${esc(e.message||e)}.<br><span class="muted">Verifique a conexão e recarregue.</span></div>`;}
@@ -475,13 +483,14 @@ async function verCliente(id){
 let _tipos=[]; let SEL={cid:null,nome:null,tel:null};
 async function vDespachante(){
   try{
-    _tipos=await q(sb.from('tipos_processo').select('*').order('nome'));
+    _tipos=await q(sb.from('tipos_processo').select('*').eq('ativo',true).order('grupo').order('nome'));
     _clientes=await q(sb.from('clientes').select('id,nome,cpf,telefone').order('nome'));
     const procs=await q(sb.from('processos').select('id,status,atividade, clientes(nome), tipos_processo(nome)').order('criado_em',{ascending:false}));
-    const optT=_tipos.map(t=>`<option value="${t.id}">${esc(t.nome)}</option>`).join('');
+    const optT=_tipos.map(t=>`<option value="${t.id}">${esc(t.nome)}${t.honorario?(' — '+BRL(t.honorario)):''}</option>`).join('');
     const procRows=procs.length?procs.map(p=>`<div class="lrow" onclick="openProcesso('${p.id}')">
         <div style="min-width:0"><div class="cell-name">${esc(p.clientes?.nome||'—')}</div><div class="cell-sub">${esc(p.tipos_processo?.nome||'')}</div></div>
         <div class="r"><span class="pill p-info">${esc(p.status)}</span></div></div>`).join(''):'<div class="empty">Nenhum processo aberto ainda.</div>';
+    const hon0=_tipos[0]?.honorario||'';
     el('view').innerHTML=`
       <div class="card"><div class="card-h"><h3>Montar processo</h3></div><div class="card-b">
         <label class="lbl">Cliente</label>
@@ -489,21 +498,24 @@ async function vDespachante(){
         <div id="dp-res"></div>
         <div id="dp-sel" style="margin-top:8px"></div>
         <div class="form-grid" style="margin-top:14px">
-          <div><label class="lbl">Operação</label><select class="inp" id="dp-tipo">${optT}</select></div>
-          <div><label class="lbl">Atividade (pode marcar mais de uma)</label>
+          <div><label class="lbl">Operação</label><select class="inp" id="dp-tipo" onchange="honorAutofill()">${optT}</select></div>
+          <div><label class="lbl">Honorário (R$) — pago na abertura</label><input class="inp mono" id="dp-honor" type="number" step="0.01" value="${hon0}"></div>
+          <div class="full"><label class="lbl">Atividade (pode marcar mais de uma)</label>
             <div class="chkrow" style="padding-top:6px">
               <label class="chk"><input type="checkbox" id="act-atirador" checked> Atirador</label>
               <label class="chk"><input type="checkbox" id="act-colecionador"> Colecionador</label>
               <label class="chk"><input type="checkbox" id="act-cacador"> Caçador</label>
             </div></div>
         </div>
-        <button class="btn" style="margin-top:14px;width:100%" onclick="iniciarProcesso()">Abrir processo e ver documentos</button>
+        <div class="muted" style="font-size:11.5px;margin-top:8px">A GRU (taxa federal) é paga separadamente pelo cliente e não entra como receita.</div>
+        <button class="btn" style="margin-top:12px;width:100%" onclick="iniciarProcesso()">Abrir processo (lança a receita do honorário)</button>
       </div></div>
       <div id="dp-out"></div>
       <div class="card"><div class="card-h"><h3>Processos em andamento</h3></div><div class="card-b" style="padding:0">${procRows}</div></div>`;
     el('dp-busca').addEventListener('input',e=>buscaClienteDP(e.target.value));
   }catch(e){el('view').innerHTML=erro(e);}
 }
+function honorAutofill(){const t=_tipos.find(x=>x.id===el('dp-tipo').value);if(t&&el('dp-honor'))el('dp-honor').value=t.honorario||'';}
 function buscaClienteDP(term){
   const list=filtraClientes(term).slice(0,8);
   if(!term.trim()||!list.length){el('dp-res').innerHTML='';return;}
@@ -521,8 +533,12 @@ async function iniciarProcesso(){
   if(!SEL.cid){alert('Busque e selecione um cliente primeiro.');return;}
   const acts=actsSelecionadas();
   if(!acts.length){alert('Marque ao menos uma atividade.');return;}
+  const honor=parseFloat(el('dp-honor').value)||0;
   try{
-    const p=await q(sb.from('processos').insert({cliente_id:SEL.cid,tipo_processo_id:el('dp-tipo').value,atividade:acts.join(','),status:'coleta_documentos'}).select().single());
+    const p=await q(sb.from('processos').insert({cliente_id:SEL.cid,tipo_processo_id:el('dp-tipo').value,atividade:acts.join(','),status:'coleta_documentos',honorario:honor||null}).select().single());
+    if(honor>0){ // honorário pago na abertura → gera receita automática
+      await q(sb.from('pagamentos').insert({processo_id:p.id,tipo:'entrada',valor:honor,data:hoje(),metodo:'honorário'}));
+    }
     openProcesso(p.id);
   }catch(e){alert('Erro ao abrir processo: '+(e.message||e));}
 }
@@ -567,7 +583,7 @@ async function renderChecklist(cid,tid,acts,pid,p){
     el('dp-out').innerHTML=`<div class="card"><div class="card-h"><h3>${esc(p?.tipos_processo?.nome||_tipos.find(t=>t.id===tid)?.nome||'Processo')} — ${esc(cli.nome)}</h3>
         <div class="spacer"></div><span class="muted">${aplic.length-faltam}/${aplic.length} ok</span></div>
         <div class="card-b">
-          <div class="muted" style="font-size:12px;margin-bottom:10px">Atividade: ${esc(acts.join(', ')||'—')} · Pasta no Drive: <b>${esc((onlyNum(cli.cpf)||'SEMCPF')+'_'+slug(cli.nome))}</b></div>
+          <div class="muted" style="font-size:12px;margin-bottom:10px">Atividade: ${esc(acts.join(', ')||'—')}${p&&p.honorario?` · Honorário: <b>${BRL(p.honorario)}</b> <span class="pill p-ok">pago</span>`:''} · Pasta: <b>${esc((onlyNum(cli.cpf)||'SEMCPF')+'_'+slug(cli.nome))}</b></div>
           ${rows}
           <div class="rowflex" style="margin-top:16px">
             <button class="btn btn-ghost btn-sm" onclick="copiarMsg('${cid}','${tid}','${acts.join(',')}')">Copiar pendências</button>
@@ -824,6 +840,52 @@ async function excluirPlano(id){
   if(!confirm('Excluir este plano e seus pagamentos? Esta ação não pode ser desfeita.'))return;
   try{await q(sb.from('planos').delete().eq('id',id));closeOv();vAcademy();}
   catch(e){alert('Erro ao excluir: '+(e.message||e));}
+}
+
+/* ============ ADMIN — Serviços & Honorários ============ */
+async function vAdmin(){
+  try{
+    const servs=await q(sb.from('tipos_processo').select('*').order('grupo').order('nome'));
+    const rows=servs.map(s=>`<div class="lrow" onclick='modalServico(${JSON.stringify(s).replace(/'/g,"&#39;")})'>
+        <div style="min-width:0"><div class="cell-name">${esc(s.nome)} ${s.ativo?'':'<span class="tag">inativo</span>'}</div>
+          <div class="cell-sub">${s.grupo?esc(s.grupo)+' · ':''}GRU ${s.taxa_pf?BRL(s.taxa_pf):'—'}</div></div>
+        <div class="r"><div class="cell-name">${s.honorario?BRL(s.honorario):'—'}</div><div class="cell-sub">honorário</div></div></div>`).join('');
+    el('view').innerHTML=`
+      <div class="card"><div class="card-b">
+        <div class="rowflex"><b>Administração</b><span class="muted" style="font-size:12px">— edite aqui os serviços e valores; muda direto no sistema, sem código.</span></div>
+      </div></div>
+      <div class="card"><div class="card-h"><h3>Serviços de despachante &amp; honorários</h3><div class="spacer"></div>
+        <button class="btn btn-sm" onclick="modalServico()">+ Novo serviço</button></div>
+        <div class="card-b" style="padding:0">${servs.length?rows:'<div class="empty">Nenhum serviço.</div>'}</div></div>
+      <div class="muted" style="font-size:12px;padding:0 4px">A GRU (taxa federal) é informativa — paga pelo cliente e não entra como receita. A receita é o honorário, lançada quando o processo é aberto.</div>`;
+  }catch(e){el('view').innerHTML=erro(e);}
+}
+function modalServico(s){
+  openOv(s?'Editar serviço':'Novo serviço',`<div class="form-grid">
+    <div class="full"><label class="lbl">Nome do serviço *</label><input class="inp" id="sv-nome"></div>
+    <div><label class="lbl">Honorário (R$)</label><input class="inp mono" id="sv-hon" type="number" step="0.01"></div>
+    <div><label class="lbl">GRU / taxa federal (R$)</label><input class="inp mono" id="sv-gru" type="number" step="0.01"></div>
+    <div><label class="lbl">Grupo</label><select class="inp" id="sv-grupo"><option value="">—</option><option>CR</option><option>POSSE</option></select></div>
+    <div><label class="lbl">Prazo estimado</label><input class="inp" id="sv-prazo" placeholder="até 90 dias"></div>
+    <div class="full"><label class="lbl">Validade do documento emitido</label><input class="inp" id="sv-val" placeholder="ex.: 180 dias / 3 anos"></div>
+    <div class="full"><label class="chk"><input type="checkbox" id="sv-ativo" checked> Serviço ativo (aparece no despachante)</label></div>
+    </div><div class="msg" id="sv-msg" style="color:var(--atraso)"></div>`,
+    `${s?`<button class="btn btn-ghost btn-danger" onclick="excluirServico('${s.id}')">Excluir</button>`:''}<button class="btn btn-ghost" onclick="closeOv()">Cancelar</button><button class="btn" onclick="salvarServico(${s?("'"+s.id+"'"):''})">${s?'Salvar':'Criar'}</button>`);
+  if(s){el('sv-nome').value=s.nome||'';el('sv-hon').value=s.honorario||'';el('sv-gru').value=s.taxa_pf||'';el('sv-grupo').value=s.grupo||'';el('sv-prazo').value=s.prazo_estimado||'';el('sv-val').value=s.validade_emitido||'';el('sv-ativo').checked=s.ativo!==false;}
+}
+async function salvarServico(id){
+  const nome=el('sv-nome').value.trim();if(!nome){el('sv-msg').textContent='Informe o nome.';return;}
+  const rec={nome,honorario:el('sv-hon').value?parseFloat(el('sv-hon').value):null,taxa_pf:el('sv-gru').value?parseFloat(el('sv-gru').value):null,
+    grupo:el('sv-grupo').value||null,prazo_estimado:el('sv-prazo').value.trim()||null,validade_emitido:el('sv-val').value.trim()||null,ativo:el('sv-ativo').checked};
+  try{if(id){await q(sb.from('tipos_processo').update(rec).eq('id',id));}else{await q(sb.from('tipos_processo').insert(rec));}closeOv();vAdmin();}
+  catch(e){el('sv-msg').textContent=((e.message||'').toLowerCase().includes('duplicate')?'Já existe um serviço com esse nome.':'Erro: '+e.message);}
+}
+async function excluirServico(id){
+  if(!confirm('Excluir este serviço? Se já houver processos usando-o, não será possível — desative-o em vez de excluir.'))return;
+  try{await q(sb.from('tipos_processo').delete().eq('id',id));closeOv();vAdmin();}
+  catch(e){const m=(e.message||'').toLowerCase();
+    if(m.includes('foreign')||m.includes('violates')||m.includes('constraint'))alert('Não é possível excluir: há processos vinculados a este serviço. Use "Serviço ativo" desmarcado para ocultá-lo.');
+    else alert('Erro ao excluir: '+(e.message||e));}
 }
 
 /* ============ PDF: DECLARAÇÕES E CERTIFICADOS ============ */
