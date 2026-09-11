@@ -422,23 +422,48 @@ async function salvarDespesa(){
 
 /* ============ CLIENTES ============ */
 let _clientes=[];
-async function vClientes(filter=''){
-  try{_clientes=await q(sb.from('clientes').select('*').order('nome'));renderClientes(filter);}
+let _cliFiltroInt='todos';
+async function vClientes(){
+  try{_clientes=await q(sb.from('clientes').select('*').order('nome'));renderClientes();}
   catch(e){el('view').innerHTML=erro(e);}
 }
 function filtraClientes(f){
   f=(f||'').toLowerCase().trim();
   return _clientes.filter(c=>!f||[c.nome,c.cpf,c.telefone].some(x=>(x||'').toLowerCase().includes(f)||onlyNum(x).includes(onlyNum(f))));
 }
-function renderClientes(filter=''){
-  const list=filtraClientes(filter);
-  const rows=list.map(c=>`<div class="lrow" onclick="verCliente('${c.id}')">
+function renderClientes(){
+  const chips=['todos','Formação','Documentação Controlada','Ambos'];
+  const chipHtml=chips.map(k=>`<button class="btn btn-sm ${_cliFiltroInt===k?'':'btn-ghost'}" onclick="_cliFiltroInt='${k}';drawClientes()">${k==='todos'?'Todos':(k==='Documentação Controlada'?'Documentação':k)}</button>`).join('');
+  el('view').innerHTML=`
+    <div class="card"><div class="card-b">
+      <div class="rowflex" style="gap:8px">
+        <div style="flex:1;min-width:0;position:relative">
+          <svg viewBox="0 0 24 24" style="position:absolute;left:11px;top:11px;width:16px;height:16px;stroke:var(--txt-suave);fill:none;stroke-width:1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+          <input class="inp" id="cli-busca" style="padding-left:34px" placeholder="Buscar por nome, CPF ou telefone…" oninput="drawClientes()">
+        </div>
+        <button class="btn btn-sm" onclick="modalCliente()">+ Novo</button>
+      </div>
+      <div class="rowflex" style="gap:6px;margin-top:10px">${chipHtml}</div>
+    </div></div>
+    <div class="card"><div class="card-h"><h3>Clientes <span class="muted" id="cli-count" style="font-weight:500"></span></h3></div>
+      <div class="card-b" style="padding:0" id="cli-list"></div></div>`;
+  drawClientes();
+  const b=el('cli-busca'); if(b)b.focus();
+}
+function drawClientes(){
+  let list=filtraClientes(el('cli-busca')?.value||'');
+  if(_cliFiltroInt!=='todos')list=list.filter(c=>(c.interesse||'')===_cliFiltroInt);
+  const rows=list.map(c=>{
+    const loc=[c.cidade,c.uf].filter(Boolean).join('/');
+    const intTag=c.interesse?`<span class="tag">${esc(c.interesse)}</span>`:'';
+    return `<div class="lrow" onclick="verCliente('${c.id}')">
       <div class="avatar">${ini(c.nome)}</div>
-      <div style="min-width:0"><div class="cell-name">${esc(c.nome)}</div><div class="cell-sub">${esc(cpfFmt(c.cpf))} · ${esc(c.telefone||'—')}</div></div>
-      <div class="r"><span class="tag">${esc(c.interesse||'—')}</span></div></div>`).join('');
-  el('view').innerHTML=`<div class="card"><div class="card-h"><h3>Clientes <span class="muted" style="font-weight:500">(${list.length})</span></h3><div class="spacer"></div>
-      <button class="btn btn-sm" onclick="modalCliente()">+ Novo cliente</button></div>
-      <div class="card-b" style="padding:0">${list.length?rows:'<div class="empty">Nenhum cliente encontrado.</div>'}</div></div>`;
+      <div style="min-width:0;flex:1"><div class="cell-name">${esc(c.nome)}</div>
+        <div class="cell-sub">${esc(cpfFmt(c.cpf))}${c.telefone?' · '+esc(c.telefone):''}${loc?' · '+esc(loc):''}</div></div>
+      <div class="r">${intTag}</div>
+      <svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:var(--txt-suave);fill:none;stroke-width:2;flex:none;margin-left:4px"><path d="M9 6l6 6-6 6"/></svg></div>`;}).join('');
+  el('cli-list').innerHTML=list.length?rows:'<div class="empty">Nenhum cliente encontrado.</div>';
+  const cc=el('cli-count'); if(cc)cc.textContent='('+list.length+')';
 }
 function clienteFormHTML(){return `<div class="form-grid">
   <div class="full"><label class="lbl">Nome completo *</label><input class="inp" id="c-nome"></div>
@@ -893,7 +918,11 @@ async function salvarPagamento(matId,tid){
 }
 
 /* SEARCH */
-el('globalSearch').addEventListener('input',e=>{if(currentView!=='clientes')go('clientes');setTimeout(()=>renderClientes(e.target.value),60);});
+el('globalSearch').addEventListener('input',e=>{
+  const v=e.target.value;
+  if(currentView!=='clientes'){go('clientes');setTimeout(()=>{const b=el('cli-busca');if(b){b.value=v;drawClientes();}},220);}
+  else{const b=el('cli-busca');if(b){b.value=v;drawClientes();}}
+});
 
 /* ============ PLANOS PERSONALIZADOS ============ */
 async function modalPlano(plano){
