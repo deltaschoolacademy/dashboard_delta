@@ -186,6 +186,7 @@ tr:last-child td{border-bottom:none}
         <div class="nav-item" data-view="clientes"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M17 14c2.2 0 4 1.8 4 4"/></svg> Clientes</div>
         <div class="nav-item" data-view="despachante"><svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7zM14 3v4h4M9 12h6M9 16h6"/></svg> Despachante</div>
         <div class="nav-item" data-view="academy"><svg viewBox="0 0 24 24"><path d="M12 3 2 8l10 5 10-5zM6 10.5V16c0 1.5 2.7 3 6 3s6-1.5 6-3v-5.5"/></svg> Academia</div>
+        <div class="nav-item" data-view="radar"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 12l6-4"/></svg> Radar</div>
         <div class="nav-item" data-view="admin" id="nav-admin" style="display:none"><svg viewBox="0 0 24 24"><path d="M12 2l7 4v6c0 4-3 7-7 8-4-1-7-4-7-8V6z"/></svg> Admin</div>
       </nav>
       <div class="sb-bot"><div class="who" id="who">—</div><button class="btn btn-ghost btn-sm" id="logout" style="width:100%;color:var(--ivory);border-color:var(--linha-dark)">Sair</button></div>
@@ -259,6 +260,24 @@ async function doLogin(){
 el('li-btn').addEventListener('click',doLogin);
 el('li-pass').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin();});
 el('logout').addEventListener('click',()=>sb.auth.signOut());
+/* ==== CADEIA DE STATUS DO PROCESSO ==== */
+const STATUS=[
+ ['em_andamento','Em andamento','p-info'],
+ ['pendente','Pendente','p-pend'],
+ ['falta_documentacao','Falta documentação','p-pend'],
+ ['pronto_protocolar','Pronto para protocolar','p-info'],
+ ['protocolado','Protocolado','p-info'],
+ ['em_analise','Em análise','p-info'],
+ ['deferido','Deferido','p-ok'],
+ ['restituido','Restituído','p-pend'],
+ ['indeferido','Indeferido','p-atraso'],
+ ['cancelado','Cancelado','p-atraso']];
+const stLabel=s=>(STATUS.find(x=>x[0]===s)||[s,s,'p-info'])[1];
+const stClass=s=>(STATUS.find(x=>x[0]===s)||[s,s,'p-info'])[2];
+const diasAte=d=>{if(!d)return null;const a=new Date(d+'T00:00:00'),b=new Date(hoje()+'T00:00:00');return Math.round((a-b)/86400000);};
+const venClass=n=>n==null?'p-info':(n<0?'p-atraso':(n<=30?'p-pend':'p-ok'));
+const venTexto=n=>n==null?'—':(n<0?`vencido há ${Math.abs(n)}d`:(n===0?'vence hoje':`faltam ${n}d`));
+
 /* ==== ADMIN: apenas o e-mail principal ==== */
 const ADMIN_EMAILS=['deltaschoolacademy@gmail.com']; // ← e-mail(s) com acesso à aba Admin
 const isAdmin=email=>ADMIN_EMAILS.map(x=>x.toLowerCase()).includes((email||'').toLowerCase());
@@ -272,14 +291,14 @@ sb.auth.onAuthStateChange((_e,s)=>{
 
 /* NAV */
 let currentView='inicio';
-const titles={inicio:'Início',clientes:'Clientes',despachante:'Serviços de Despachante',academy:'Delta School Academy',admin:'Administração'};
+const titles={inicio:'Início',clientes:'Clientes',despachante:'Serviços de Despachante',academy:'Delta School Academy',radar:'Radar de Vencimentos',admin:'Administração'};
 function go(v){
   if(v==='admin'&&!isAdmin(el('who').textContent)){v='inicio';}
   currentView=v; toggleNav(false);
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('on',n.dataset.view===v));
   el('pageTitle').textContent=titles[v]||'—';
   el('view').innerHTML='<div class="loading">Carregando…</div>';
-  ({inicio:vInicio,clientes:vClientes,despachante:vDespachante,academy:vAcademy,admin:vAdmin}[v]||vInicio)();
+  ({inicio:vInicio,clientes:vClientes,despachante:vDespachante,academy:vAcademy,radar:vRadar,admin:vAdmin}[v]||vInicio)();
 }
 el('nav').addEventListener('click',e=>{const it=e.target.closest('.nav-item');if(it)go(it.dataset.view);});
 function erro(e){return `<div class="empty">Erro ao carregar: ${esc(e.message||e)}.<br><span class="muted">Verifique a conexão e recarregue.</span></div>`;}
@@ -287,25 +306,40 @@ function erro(e){return `<div class="empty">Erro ao carregar: ${esc(e.message||e
 /* ============ INÍCIO ============ */
 async function vInicio(){
   try{
-    const lanc=await q(sb.from('lancamentos').select('*').order('data',{ascending:false}));
-    const rec=lanc.filter(l=>l.tipo==='receita').reduce((a,l)=>a+Number(l.valor),0);
-    const des=lanc.filter(l=>l.tipo==='despesa').reduce((a,l)=>a+Number(l.valor),0);
+    const [lanc,procs,vencs]=await Promise.all([
+      q(sb.from('lancamentos').select('*').order('data',{ascending:false})),
+      q(sb.from('processos').select('id,status')),
+      q(sb.from('radar_vencimentos').select('data_validade')).catch(()=>[])
+    ]);
+    const pago=l=>l.status!=='pendente'&&l.status!=='atrasado';
+    const rec=lanc.filter(l=>l.tipo==='receita'&&pago(l)).reduce((a,l)=>a+Number(l.valor),0);
+    const des=lanc.filter(l=>l.tipo==='despesa'&&pago(l)).reduce((a,l)=>a+Number(l.valor),0);
+    const aReceber=lanc.filter(l=>l.tipo==='receita'&&!pago(l)).reduce((a,l)=>a+Number(l.valor),0);
+    const aPagar=lanc.filter(l=>l.tipo==='despesa'&&!pago(l)).reduce((a,l)=>a+Number(l.valor),0);
+    const abertos=procs.filter(p=>!['deferido','cancelado','indeferido'].includes(p.status)).length;
+    const venc60=(vencs||[]).map(v=>diasAte((v.data_validade||'').slice(0,10))).filter(d=>d!=null&&d<=60).length;
     const rows=lanc.map(l=>`<tr>
       <td>${l.tipo==='receita'?'<span class="pill p-ok">entrada</span>':'<span class="pill p-atraso">saída</span>'}</td>
       <td class="cell-name">${esc(l.descricao)}<div class="cell-sub">${esc(l.fornecedor||l.categoria||'')}</div></td>
-      <td>${l.fonte==='auto'?'<span class="tag">automático</span>':'<span class="tag">manual</span>'}</td>
+      <td>${pago(l)?'<span class="tag">pago</span>':`<span class="pill ${l.status==='atrasado'?'p-atraso':'p-pend'}">${esc(l.status)}</span>`}</td>
       <td class="mono">${dBR(l.data)}</td>
       <td class="mono ${l.tipo==='receita'?'v-in':'v-out'}" style="text-align:right">${l.tipo==='receita'?'+':'−'} ${BRL(l.valor)}</td></tr>`).join('');
     el('view').innerHTML=`
       <div class="grid g-kpi" style="margin-bottom:16px">
-        <div class="kpi"><div class="l">Receitas</div><div class="v in">${BRL(rec)}</div></div>
-        <div class="kpi"><div class="l">Despesas</div><div class="v out">${BRL(des)}</div></div>
+        <div class="kpi"><div class="l">Recebido</div><div class="v in">${BRL(rec)}</div></div>
+        <div class="kpi"><div class="l">Pago</div><div class="v out">${BRL(des)}</div></div>
         <div class="kpi"><div class="l">Saldo</div><div class="v">${BRL(rec-des)}</div></div>
+        <div class="kpi"><div class="l">A receber</div><div class="v">${BRL(aReceber)}</div></div>
+      </div>
+      <div class="grid g-kpi" style="margin-bottom:16px">
+        <div class="kpi"><div class="l">A pagar</div><div class="v out">${BRL(aPagar)}</div></div>
+        <div class="kpi"><div class="l">Processos abertos</div><div class="v">${abertos}</div></div>
+        <div class="kpi" style="cursor:pointer" onclick="go('radar')"><div class="l">Vencendo em 60d</div><div class="v">${venc60}</div></div>
         <div class="kpi"><div class="l">Lançamentos</div><div class="v">${lanc.length}</div></div>
       </div>
       <div class="card"><div class="card-h"><h3>Fluxo de caixa</h3><div class="spacer"></div>
         <button class="btn btn-sm" onclick="modalDespesa()">+ Lançar despesa</button></div>
-        <div class="card-b" style="padding:0"><div class="tbl-wrap">${lanc.length?`<table><thead><tr><th>Tipo</th><th>Descrição</th><th>Fonte</th><th>Data</th><th style="text-align:right">Valor</th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="empty">Nenhum lançamento ainda.</div>'}</div></div></div>`;
+        <div class="card-b" style="padding:0"><div class="tbl-wrap">${lanc.length?`<table><thead><tr><th>Tipo</th><th>Descrição</th><th>Situação</th><th>Data</th><th style="text-align:right">Valor</th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="empty">Nenhum lançamento ainda.</div>'}</div></div></div>`;
   }catch(e){el('view').innerHTML=erro(e);}
 }
 function modalDespesa(){
@@ -317,13 +351,16 @@ function modalDespesa(){
     </div>
     <div class="form-grid">
     <div class="full"><label class="lbl">Descrição</label><input class="inp" id="d-desc"></div>
-    <div><label class="lbl">Categoria</label><input class="inp" id="d-cat" placeholder="Operacional"></div>
+    <div><label class="lbl">Categoria</label><select class="inp" id="d-cat">${CAT_DESP.map(c=>`<option>${c}</option>`).join('')}</select></div>
     <div><label class="lbl">Fornecedor</label><input class="inp" id="d-forn"></div>
     <div><label class="lbl">Valor (R$)</label><input class="inp mono" id="d-val" type="number" step="0.01"></div>
     <div><label class="lbl">Data</label><input class="inp" id="d-data" type="date" value="${hoje()}"></div>
+    <div><label class="lbl">Situação</label><select class="inp" id="d-status"><option value="pago">Pago</option><option value="pendente">Pendente</option><option value="atrasado">Atrasado</option></select></div>
+    <div><label class="lbl">Vencimento (se pendente)</label><input class="inp" id="d-venc" type="date"></div>
     </div><div class="msg" id="d-msg" style="color:var(--atraso)"></div>`,
     `<button class="btn btn-ghost" onclick="closeOv()">Cancelar</button><button class="btn" onclick="salvarDespesa()">Salvar</button>`);
 }
+const CAT_DESP=['Operacional','GRU / taxas','Exame psicológico','Exame de tiro','Filiação','Material','Equipamento','Combustível','Alimentação','Aluguel','Salários','Impostos','Marketing','Gastos extras','Outros'];
 let _ocrFonte='manual';
 function lerCupom(){
   const inp=document.createElement('input');inp.type='file';inp.accept='image/*,application/pdf,.pdf';inp.setAttribute('capture','environment');
@@ -355,7 +392,7 @@ async function processarCupom(file){
     if(p.valor!=null)el('d-val').value=p.valor;
     if(p.fornecedor)el('d-forn').value=p.fornecedor;
     if(p.data)el('d-data').value=p.data;
-    if(p.categoria)el('d-cat').value=p.categoria;
+    if(p.categoria){const m=CAT_DESP.find(c=>c.toLowerCase().includes(String(p.categoria).toLowerCase())||String(p.categoria).toLowerCase().includes(c.toLowerCase()));el('d-cat').value=m||'Outros';}
     if(!el('d-desc').value)el('d-desc').value=p.fornecedor?('Compra — '+p.fornecedor):(isPdf?'Despesa (nota fiscal)':'Despesa (cupom)');
     _ocrFonte='cupom';
     set('var(--oliva)','Preenchido pela leitura'+(isPdf?' da nota':' do cupom')+'. Confira e salve.');
@@ -364,7 +401,7 @@ async function processarCupom(file){
 async function salvarDespesa(){
   const desc=el('d-desc').value.trim(),val=parseFloat(el('d-val').value);
   if(!desc||!(val>0)){el('d-msg').textContent='Preencha descrição e valor.';return;}
-  try{await q(sb.from('lancamentos').insert({tipo:'despesa',descricao:desc,categoria:el('d-cat').value.trim()||'Geral',fornecedor:el('d-forn').value.trim()||null,valor:val,data:el('d-data').value||hoje(),fonte:_ocrFonte}));_ocrFonte='manual';closeOv();vInicio();}
+  try{await q(sb.from('lancamentos').insert({tipo:'despesa',descricao:desc,categoria:el('d-cat').value||'Outros',fornecedor:el('d-forn').value.trim()||null,valor:val,data:el('d-data').value||hoje(),fonte:_ocrFonte,status:el('d-status').value||'pago',vencimento:el('d-venc').value||null}));_ocrFonte='manual';closeOv();vInicio();}
   catch(e){el('d-msg').textContent='Erro: '+e.message;}
 }
 
@@ -408,6 +445,7 @@ function clienteFormHTML(){return `<div class="form-grid">
   <div><label class="lbl">Cidade</label><input class="inp" id="c-cidade"></div>
   <div><label class="lbl">UF</label><input class="inp" id="c-uf" maxlength="2"></div>
   <div><label class="lbl">CR / CAF</label><input class="inp" id="c-cr"></div>
+  <div><label class="lbl">Validade do CR</label><input class="inp" id="c-crval" type="date"></div>
   <div><label class="lbl">Clube</label><input class="inp" id="c-clube"></div>
   <div><label class="lbl">Interesse</label><select class="inp" id="c-interesse"><option value="">—</option><option>Formação</option><option>Documentação Controlada</option><option>Ambos</option><option>Ainda não sei / quero saber mais</option></select></div>
   <div><label class="lbl">Área de interesse</label><select class="inp" id="c-area"><option value="">—</option><option>Formação técnica</option><option>Formação estratégica</option><option>Curso livre / capacitação</option><option>Certificação</option><option>Ainda não sei / quero orientação</option></select></div>
@@ -425,7 +463,7 @@ function modalCliente(cli){
     set('c-tel',cli.telefone);set('c-email',cli.email);set('c-insta',cli.instagram);
     set('c-cep',cli.cep);set('c-num',cli.numero);set('c-log',cli.logradouro);set('c-bairro',cli.bairro);
     set('c-comp',cli.complemento);set('c-cidade',cli.cidade);set('c-uf',cli.uf);set('c-cr',cli.cr_caf);
-    set('c-clube',cli.clube);set('c-interesse',cli.interesse);set('c-area',cli.area_interesse);
+    set('c-clube',cli.clube);set('c-crval',(cli.cr_validade||'').slice(0,10));set('c-interesse',cli.interesse);set('c-area',cli.area_interesse);
     set('c-serv',cli.servico_desejado);set('c-origem',cli.origem);set('c-obs',cli.observacoes);}
 }
 async function salvarCliente(id){
@@ -438,7 +476,7 @@ async function salvarCliente(id){
     cep:el('c-cep').value.trim()||null,logradouro:el('c-log').value.trim()||null,
     numero:el('c-num').value.trim()||null,complemento:el('c-comp').value.trim()||null,
     bairro:el('c-bairro').value.trim()||null,cidade:el('c-cidade').value.trim()||null,
-    uf:el('c-uf').value.trim().toUpperCase()||null,cr_caf:el('c-cr').value.trim()||null,
+    uf:el('c-uf').value.trim().toUpperCase()||null,cr_caf:el('c-cr').value.trim()||null,cr_validade:el('c-crval').value||null,
     clube:el('c-clube').value.trim()||null,interesse:el('c-interesse').value||null,
     instagram:el('c-insta').value.trim()||null,area_interesse:el('c-area').value||null,servico_desejado:el('c-serv').value||null,
     origem:el('c-origem').value||null,observacoes:el('c-obs').value.trim()||null};
@@ -485,11 +523,12 @@ async function vDespachante(){
   try{
     _tipos=await q(sb.from('tipos_processo').select('*').eq('ativo',true).order('grupo').order('nome'));
     _clientes=await q(sb.from('clientes').select('id,nome,cpf,telefone').order('nome'));
-    const procs=await q(sb.from('processos').select('id,status,atividade, clientes(nome), tipos_processo(nome)').order('criado_em',{ascending:false}));
+    const procs=await q(sb.from('processos').select('id,status,atividade,progresso, clientes(nome), tipos_processo(nome)').order('criado_em',{ascending:false}));
     const optT=_tipos.map(t=>`<option value="${t.id}">${esc(t.nome)}${t.honorario?(' — '+BRL(t.honorario)):''}</option>`).join('');
     const procRows=procs.length?procs.map(p=>`<div class="lrow" onclick="openProcesso('${p.id}')">
-        <div style="min-width:0"><div class="cell-name">${esc(p.clientes?.nome||'—')}</div><div class="cell-sub">${esc(p.tipos_processo?.nome||'')}</div></div>
-        <div class="r"><span class="pill p-info">${esc(p.status)}</span></div></div>`).join(''):'<div class="empty">Nenhum processo aberto ainda.</div>';
+        <div style="min-width:0;flex:1"><div class="cell-name">${esc(p.clientes?.nome||'—')}</div><div class="cell-sub">${esc(p.tipos_processo?.nome||'')}</div>
+          <div class="prog" style="height:6px;margin:6px 0 0"><i style="width:${p.progresso||0}%"></i></div></div>
+        <div class="r"><span class="pill ${stClass(p.status)}">${esc(stLabel(p.status))}</span><div class="cell-sub">${p.progresso||0}%</div></div></div>`).join(''):'<div class="empty">Nenhum processo aberto ainda.</div>';
     const hon0=_tipos[0]?.honorario||'';
     el('view').innerHTML=`
       <div class="card"><div class="card-h"><h3>Montar processo</h3></div><div class="card-b">
@@ -535,7 +574,11 @@ async function iniciarProcesso(){
   if(!acts.length){alert('Marque ao menos uma atividade.');return;}
   const honor=parseFloat(el('dp-honor').value)||0;
   try{
-    const p=await q(sb.from('processos').insert({cliente_id:SEL.cid,tipo_processo_id:el('dp-tipo').value,atividade:acts.join(','),status:'coleta_documentos',honorario:honor||null}).select().single());
+    const tid=el('dp-tipo').value;
+    let etapas=[];
+    try{const et=await q(sb.from('tipos_processo_etapas').select('nome,ordem').eq('tipo_processo_id',tid).order('ordem'));
+      etapas=et.map(e=>({nome:e.nome,feita:false,data:null}));}catch(_){}
+    const p=await q(sb.from('processos').insert({cliente_id:SEL.cid,tipo_processo_id:tid,atividade:acts.join(','),status:'em_andamento',honorario:honor||null,etapas,progresso:0}).select().single());
     if(honor>0){ // honorário pago na abertura → gera receita automática
       await q(sb.from('pagamentos').insert({processo_id:p.id,tipo:'entrada',valor:honor,data:hoje(),metodo:'honorário'}));
     }
@@ -580,24 +623,82 @@ async function renderChecklist(cid,tid,acts,pid,p){
         <div style="flex:1;min-width:0">${esc(d.nome_comercial||d.nome_sistema)}${cond}<div class="cell-sub">${esc(d.nome_sistema)}</div></div>
         <span class="resp">${respLabel[d.responsavel]||d.responsavel}</span>${acao}</div>`;}).join('');
     const tel=onlyNum(cli.telefone);
+    // --- etapas e progresso ---
+    const etapas=Array.isArray(p?.etapas)?p.etapas:[];
+    const feitas=etapas.filter(e=>e.feita).length;
+    const pct=etapas.length?Math.round(feitas/etapas.length*100):0;
+    const etapasHtml=etapas.length?etapas.map((e,i)=>`<div class="doc-row">
+        <input type="checkbox" style="width:17px;height:17px;accent-color:var(--oliva)" ${e.feita?'checked':''} onchange="toggleEtapa('${pid}',${i},this.checked)">
+        <div style="flex:1;min-width:0">${esc(e.nome)}${e.data?`<div class="cell-sub">concluída em ${dBR(e.data)}</div>`:''}</div>
+      </div>`).join(''):'<div class="muted" style="padding:6px 0;font-size:12.5px">Sem etapas definidas para este serviço.</div>';
+
     el('dp-out').innerHTML=`<div class="card"><div class="card-h"><h3>${esc(p?.tipos_processo?.nome||_tipos.find(t=>t.id===tid)?.nome||'Processo')} — ${esc(cli.nome)}</h3>
-        <div class="spacer"></div><span class="muted">${aplic.length-faltam}/${aplic.length} ok</span></div>
+        <span class="pill ${stClass(p?.status)}" style="margin-left:8px">${esc(stLabel(p?.status))}</span>
+        <div class="spacer"></div><span class="muted">${aplic.length-faltam}/${aplic.length} docs</span></div>
         <div class="card-b">
-          <div class="muted" style="font-size:12px;margin-bottom:10px">Atividade: ${esc(acts.join(', ')||'—')}${p&&p.honorario?` · Honorário: <b>${BRL(p.honorario)}</b> <span class="pill p-ok">pago</span>`:''} · Pasta: <b>${esc((onlyNum(cli.cpf)||'SEMCPF')+'_'+slug(cli.nome))}</b></div>
+          <div class="muted" style="font-size:12px;margin-bottom:8px">Atividade: ${esc(acts.join(', ')||'—')}${p&&p.honorario?` · Honorário: <b>${BRL(p.honorario)}</b> <span class="pill p-ok">pago</span>`:''} · Pasta: <b>${esc((onlyNum(cli.cpf)||'SEMCPF')+'_'+slug(cli.nome))}</b></div>
+
+          <div class="rowflex" style="font-size:12px"><span class="lbl" style="margin:0">Progresso</span><div class="spacer"></div><span class="muted">${feitas}/${etapas.length} etapas · ${pct}%</span></div>
+          <div class="prog ${pct>=100?'full':''}"><i style="width:${pct}%"></i></div>
+          ${etapasHtml}
+
+          <div class="lbl" style="margin-top:16px">Documentos</div>
           ${rows}
-          <div class="rowflex" style="margin-top:16px">
+
+          <div class="lbl" style="margin-top:16px">Protocolo e resultado</div>
+          <div class="form-grid">
+            <div><label class="lbl">Status</label><select class="inp" id="pr-status" onchange="mudarStatus('${pid}',this.value)">
+              ${STATUS.map(s=>`<option value="${s[0]}" ${p&&p.status===s[0]?'selected':''}>${s[1]}</option>`).join('')}</select></div>
+            <div><label class="lbl">Nº do protocolo</label><input class="inp mono" id="pr-prot" value="${esc(p?.numero_protocolo||'')}"></div>
+            <div><label class="lbl">Senha gov.br do processo</label><input class="inp" id="pr-senha" value="${esc(p?.senha_gov||'')}"></div>
+            <div><label class="lbl">Data do protocolo</label><input class="inp" id="pr-dprot" type="date" value="${(p?.data_protocolo||'').slice(0,10)}"></div>
+            <div><label class="lbl">Documento emitido (nº)</label><input class="inp mono" id="pr-docn" value="${esc(p?.documento_numero||'')}"></div>
+            <div><label class="lbl">Validade do documento</label><input class="inp" id="pr-docv" type="date" value="${(p?.documento_validade||'').slice(0,10)}"></div>
+            <div class="full"><label class="lbl">Observação</label><textarea class="inp" id="pr-obs" rows="2">${esc(p?.observacao||'')}</textarea></div>
+          </div>
+          <div class="muted" style="font-size:11.5px;margin-top:6px">Preencher a validade do documento faz o processo entrar no Radar de Vencimentos.</div>
+
+          <div class="rowflex" style="margin-top:14px">
             <button class="btn btn-ghost btn-sm" onclick="copiarMsg('${cid}','${tid}','${acts.join(',')}')">Copiar pendências</button>
-            ${tel?`<button class="btn btn-sm" onclick="abrirWa('${cid}','${tid}','${acts.join(',')}','${tel}')">WhatsApp</button>`:''}
+            ${tel?`<button class="btn btn-ghost btn-sm" onclick="abrirWa('${cid}','${tid}','${acts.join(',')}','${tel}')">WhatsApp</button>`:''}
             <div class="spacer"></div>
-            <select class="inp" style="width:auto" onchange="mudarStatus('${pid}',this.value)">
-              ${['triagem','coleta_documentos','protocolado','concluido','cancelado'].map(s=>`<option ${p&&p.status===s?'selected':''}>${s}</option>`).join('')}
-            </select>
-            <button class="btn btn-danger btn-sm" onclick="excluirProcesso('${pid}')">Excluir processo</button>
+            <button class="btn btn-sm" onclick="salvarProcesso('${pid}')">Salvar dados do processo</button>
+            <button class="btn btn-danger btn-sm" onclick="excluirProcesso('${pid}')">Excluir</button>
           </div>
         </div></div>`;
   }catch(e){el('dp-out').innerHTML=erro(e);}
 }
-async function mudarStatus(pid,status){try{await q(sb.from('processos').update({status}).eq('id',pid));}catch(e){alert('Erro: '+e.message);}}
+async function toggleEtapa(pid,idx,feita){
+  try{
+    const p=(await q(sb.from('processos').select('etapas').eq('id',pid)))[0];
+    const et=Array.isArray(p.etapas)?p.etapas:[];
+    if(!et[idx])return;
+    et[idx].feita=feita; et[idx].data=feita?hoje():null;
+    const pct=et.length?Math.round(et.filter(e=>e.feita).length/et.length*100):0;
+    await q(sb.from('processos').update({etapas:et,progresso:pct}).eq('id',pid));
+    openProcesso(pid);
+  }catch(e){alert('Erro ao atualizar etapa: '+(e.message||e));}
+}
+async function salvarProcesso(pid){
+  try{
+    const rec={numero_protocolo:el('pr-prot').value.trim()||null,senha_gov:el('pr-senha').value.trim()||null,
+      data_protocolo:el('pr-dprot').value||null,documento_numero:el('pr-docn').value.trim()||null,
+      documento_validade:el('pr-docv').value||null,observacao:el('pr-obs').value.trim()||null};
+    await q(sb.from('processos').update(rec).eq('id',pid));
+    alert('Dados do processo salvos.');
+    openProcesso(pid);
+  }catch(e){alert('Erro ao salvar: '+(e.message||e));}
+}
+async function mudarStatus(pid,status){
+  try{
+    const rec={status};
+    if(status==='protocolado')rec.data_protocolo=hoje();
+    if(status==='em_analise')rec.data_analise=hoje();
+    if(['deferido','indeferido','restituido'].includes(status)){rec.data_conclusao=hoje();rec.resultado=stLabel(status);}
+    await q(sb.from('processos').update(rec).eq('id',pid));
+    openProcesso(pid);
+  }catch(e){alert('Erro: '+e.message);}
+}
 async function excluirProcesso(pid){
   if(!confirm('Excluir este processo? Os documentos já enviados continuam no cadastro do cliente. Esta ação não pode ser desfeita.'))return;
   try{
@@ -840,6 +941,56 @@ async function excluirPlano(id){
   if(!confirm('Excluir este plano e seus pagamentos? Esta ação não pode ser desfeita.'))return;
   try{await q(sb.from('planos').delete().eq('id',id));closeOv();vAcademy();}
   catch(e){alert('Erro ao excluir: '+(e.message||e));}
+}
+
+/* ============ RADAR — vencimentos e pendências ============ */
+async function vRadar(){
+  try{
+    const [vencs,procs]=await Promise.all([
+      q(sb.from('radar_vencimentos').select('*').order('data_validade')),
+      q(sb.from('processos').select('id,status,atividade,tipo_processo_id,cliente_id, clientes(nome), tipos_processo(nome)').not('status','in','("deferido","cancelado","indeferido")'))
+    ]);
+    const comDias=vencs.map(v=>({...v,d:diasAte((v.data_validade||'').slice(0,10))}));
+    const vencidos=comDias.filter(v=>v.d!=null&&v.d<0);
+    const proximos=comDias.filter(v=>v.d!=null&&v.d>=0&&v.d<=60);
+    const emDia=comDias.filter(v=>v.d!=null&&v.d>60);
+
+    const linha=v=>`<div class="lrow" style="cursor:default">
+        <div style="min-width:0;flex:1"><div class="cell-name">${esc(v.cliente||'—')}</div>
+          <div class="cell-sub">${esc(v.tipo||'')}${v.referencia?' · '+esc(v.referencia):''}</div></div>
+        <div class="r"><span class="pill ${venClass(v.d)}">${venTexto(v.d)}</span>
+          <div class="cell-sub mono">${dBR(v.data_validade)}</div></div></div>`;
+
+    // pendências: processos com documentos faltando
+    const pend=[];
+    for(const p of procs){
+      try{
+        const falt=await faltantes(p.cliente_id||'', p.tipo_processo_id, p.atividade||'');
+        if(falt.length)pend.push({p,n:falt.length,doCliente:soDoCliente(falt).length});
+      }catch(_){}
+    }
+    const pendHtml=pend.length?pend.map(x=>`<div class="lrow" onclick="openProcesso('${x.p.id}')">
+        <div style="min-width:0;flex:1"><div class="cell-name">${esc(x.p.clientes?.nome||'—')}</div>
+          <div class="cell-sub">${esc(x.p.tipos_processo?.nome||'')} · ${esc(stLabel(x.p.status))}</div></div>
+        <div class="r"><span class="pill p-pend">${x.n} faltando</span>
+          <div class="cell-sub">${x.doCliente} com o cliente</div></div></div>`).join(''):'<div class="empty">Nenhuma pendência de documento.</div>';
+
+    el('view').innerHTML=`
+      <div class="grid g-kpi" style="margin-bottom:16px">
+        <div class="kpi"><div class="l">Vencidos</div><div class="v out">${vencidos.length}</div></div>
+        <div class="kpi"><div class="l">Vencem em 60 dias</div><div class="v">${proximos.length}</div></div>
+        <div class="kpi"><div class="l">Em dia</div><div class="v in">${emDia.length}</div></div>
+        <div class="kpi"><div class="l">Processos c/ pendência</div><div class="v">${pend.length}</div></div>
+      </div>
+      ${vencidos.length?`<div class="card"><div class="card-h"><h3>Vencidos</h3><div class="spacer"></div><span class="muted">${vencidos.length}</span></div>
+        <div class="card-b" style="padding:0">${vencidos.map(linha).join('')}</div></div>`:''}
+      <div class="card"><div class="card-h"><h3>Vencendo nos próximos 60 dias</h3><div class="spacer"></div><span class="muted">${proximos.length}</span></div>
+        <div class="card-b" style="padding:0">${proximos.length?proximos.map(linha).join(''):'<div class="empty">Nada vencendo nos próximos 60 dias.</div>'}</div></div>
+      <div class="card"><div class="card-h"><h3>Central de pendências</h3><div class="spacer"></div><span class="muted">${pend.length} processo(s)</span></div>
+        <div class="card-b" style="padding:0">${pendHtml}</div></div>
+      ${emDia.length?`<div class="card"><div class="card-h"><h3>Em dia</h3><div class="spacer"></div><span class="muted">${emDia.length}</span></div>
+        <div class="card-b" style="padding:0">${emDia.map(linha).join('')}</div></div>`:''}`;
+  }catch(e){el('view').innerHTML=erro(e);}
 }
 
 /* ============ ADMIN — Serviços & Honorários ============ */
